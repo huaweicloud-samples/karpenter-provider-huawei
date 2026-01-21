@@ -1,6 +1,6 @@
 # Project variables
 PROJECT_NAME := karpenter-provider-huawei
-MODULE := github.com/huaweicloud/karpenter-provider-huawei
+MODULE := github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
 GOBIN := $(shell go env GOBIN)
 ifeq ($(GOBIN),)
 GOBIN := $(shell go env GOPATH)/bin

@@ -1,4 +1,4 @@
-module github.com/huaweicloud/karpenter-provider-huawei
+module github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
 
 go 1.23.0
 
