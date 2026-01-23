@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- karpenter_v1alpha1_ecsnodeclass.yaml
+# +kubebuilder:scaffold:manifestskustomizesamples
