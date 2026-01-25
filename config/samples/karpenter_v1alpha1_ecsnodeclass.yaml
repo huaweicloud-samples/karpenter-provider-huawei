@@ -1,0 +1,9 @@
+apiVersion: karpenter.k8s.huawei/v1alpha1
+kind: ECSNodeClass
+metadata:
+  labels:
+    app.kubernetes.io/name: karpenter-provider-huawei
+    app.kubernetes.io/managed-by: kustomize
+  name: ecsnodeclass-sample
+spec:
+  # TODO(user): Add fields here
