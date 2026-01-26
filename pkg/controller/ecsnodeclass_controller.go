@@ -19,12 +19,11 @@ package controller
 import (
 	"context"
 
+	karpenterv1alpha1 "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-
-	karpenterv1alpha1 "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/api/v1alpha1"
 )
 
 // ECSNodeClassReconciler reconciles a ECSNodeClass object

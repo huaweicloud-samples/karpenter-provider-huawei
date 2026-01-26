@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 
+	karpenterv1alpha1 "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -26,8 +27,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	karpenterv1alpha1 "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/api/v1alpha1"
 )
 
 var _ = Describe("ECSNodeClass Controller", func() {
