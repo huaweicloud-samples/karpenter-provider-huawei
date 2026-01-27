@@ -1,4 +1,6 @@
 /*
+Copyright 2024 The CloudPilot AI Authors.
+
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
@@ -12,25 +14,20 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package controllers
 
 import (
-	coreoperator "sigs.k8s.io/karpenter/pkg/operator"
+	"context"
 
-	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/controllers"
-	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/operator"
+	"github.com/awslabs/operatorpkg/controller"
+	"k8s.io/utils/clock"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/karpenter/pkg/events"
 )
 
-func main() {
-	ctx, op := operator.NewOperator(coreoperator.NewOperator())
+func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock, kubeClient client.Client, recorder events.Recorder) []controller.Controller {
 
-	op.
-		WithControllers(ctx, controllers.NewControllers(
-			ctx,
-			op.Manager,
-			op.Clock,
-			op.GetClient(),
-			op.EventRecorder,
-		)...).
-		Start(ctx)
+	controllers := []controller.Controller{}
+	return controllers
 }
