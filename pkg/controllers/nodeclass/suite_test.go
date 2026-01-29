@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controller
+package nodeclass
 
 import (
 	"context"
@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	karpenterv1alpha1 "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -32,8 +33,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-
-	karpenterv1alpha1 "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
