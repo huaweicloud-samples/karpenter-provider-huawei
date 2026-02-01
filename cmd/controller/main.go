@@ -15,6 +15,7 @@ limitations under the License.
 package main
 
 import (
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/cloudprovider"
 	coreoperator "sigs.k8s.io/karpenter/pkg/operator"
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/controllers"
@@ -24,6 +25,11 @@ import (
 func main() {
 	ctx, op := operator.NewOperator(coreoperator.NewOperator())
 
+	huaweicloudProvider := cloudprovider.New(
+		op.GetClient(),
+		op.EventRecorder,
+	)
+
 	op.
 		WithControllers(ctx, controllers.NewControllers(
 			ctx,
@@ -31,6 +37,7 @@ func main() {
 			op.Clock,
 			op.GetClient(),
 			op.EventRecorder,
+			huaweicloudProvider,
 		)...).
 		Start(ctx)
 }
