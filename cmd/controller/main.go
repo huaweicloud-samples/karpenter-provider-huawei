@@ -15,8 +15,9 @@ limitations under the License.
 package main
 
 import (
-	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/cloudprovider"
 	coreoperator "sigs.k8s.io/karpenter/pkg/operator"
+
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/cloudprovider"
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/controllers"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/operator"
