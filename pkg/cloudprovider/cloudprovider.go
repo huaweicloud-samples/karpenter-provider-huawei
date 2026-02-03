@@ -28,11 +28,13 @@ import (
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
 
+// CloudProvider implements Karpenter's CloudProvider interface for Huawei Cloud.
 type CloudProvider struct {
 	kubeClient client.Client
 	recorder   events.Recorder
 }
 
+// New creates a Huawei CloudProvider implementation.
 func New(kubeClient client.Client, recorder events.Recorder) cloudprovider.CloudProvider {
 	return CloudProvider{
 		kubeClient: kubeClient,
@@ -40,45 +42,54 @@ func New(kubeClient client.Client, recorder events.Recorder) cloudprovider.Cloud
 	}
 }
 
+// Create is called by Karpenter to provision capacity for a NodeClaim.
 func (c CloudProvider) Create(ctx context.Context, claim *v1.NodeClaim) (*v1.NodeClaim, error) {
 	//TODO implement me
 	return nil, nil
 }
 
+// Delete is called by Karpenter to deprovision capacity for a NodeClaim.
 func (c CloudProvider) Delete(ctx context.Context, claim *v1.NodeClaim) error {
 	//TODO implement me
 	return nil
 }
 
+// Get returns the NodeClaim by provider ID.
 func (c CloudProvider) Get(ctx context.Context, s string) (*v1.NodeClaim, error) {
 	//TODO implement me
 	return nil, nil
 }
 
+// List returns all NodeClaims managed by this provider.
 func (c CloudProvider) List(ctx context.Context) ([]*v1.NodeClaim, error) {
 	//TODO implement me
 	return nil, nil
 }
 
+// GetInstanceTypes returns the instance types available for a given NodePool.
 func (c CloudProvider) GetInstanceTypes(ctx context.Context, pool *v1.NodePool) ([]*cloudprovider.InstanceType, error) {
 	//TODO implement me
 	return nil, nil
 }
 
+// IsDrifted indicates whether the NodeClaim is drifted from desired state.
 func (c CloudProvider) IsDrifted(ctx context.Context, claim *v1.NodeClaim) (cloudprovider.DriftReason, error) {
 	//TODO implement me
 	return cloudprovider.DriftReason(""), nil
 }
 
+// RepairPolicies returns the node repair policies supported by this provider.
 func (c CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
 	//TODO implement me
 	return nil
 }
 
+// Name returns the provider name.
 func (c CloudProvider) Name() string {
 	return "huawei"
 }
 
+// GetSupportedNodeClasses returns the NodeClass types supported by this provider.
 func (c CloudProvider) GetSupportedNodeClasses() []status.Object {
 	//TODO implement me
 	return nil

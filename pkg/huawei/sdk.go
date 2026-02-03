@@ -26,6 +26,7 @@ import (
 	vpc "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/model"
 )
 
+// ECSAPI abstracts the subset of Huawei Cloud ECS-related APIs used by this project.
 type ECSAPI interface {
 	CreateAutoLaunchGroup(request *cms.CreateAutoLaunchGroupRequest) (*cms.CreateAutoLaunchGroupResponse, error)
 	CreateServers(request *ecs.CreateServersRequest) (*ecs.CreateServersResponse, error)
@@ -38,10 +39,12 @@ type ECSAPI interface {
 	ListImages(request *ims.ListImagesRequest) (*ims.ListImagesResponse, error)
 }
 
+// CCEAPI abstracts the subset of Huawei Cloud CCE APIs used by this project.
 type CCEAPI interface {
 	ShowCluster(request *cce.ShowClusterRequest) (*cce.ShowClusterResponse, error)
 }
 
+// PricingAPI abstracts the subset of Huawei Cloud BSS pricing APIs used by this project.
 type PricingAPI interface {
 	ListOnDemandResourceRatings(request *bss.ListOnDemandResourceRatingsRequest) (*bss.ListOnDemandResourceRatingsResponse, error)
 }
