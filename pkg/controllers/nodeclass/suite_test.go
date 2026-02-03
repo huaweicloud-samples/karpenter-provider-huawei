@@ -18,6 +18,7 @@ package nodeclass
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -66,14 +67,19 @@ var _ = ginkgo.BeforeSuite(func() {
 	// +kubebuilder:scaffold:scheme
 
 	ginkgo.By("bootstrapping test environment")
+	repoRoot, err := findRepoRoot()
+	gomega.Expect(err).NotTo(gomega.HaveOccurred())
+
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		CRDDirectoryPaths:     []string{filepath.Join(repoRoot, "config", "crd", "bases")},
 		ErrorIfCRDPathMissing: true,
 	}
 
 	// Retrieve the first found binary directory to allow running tests from IDEs
-	if getFirstFoundEnvTestBinaryDir() != "" {
-		testEnv.BinaryAssetsDirectory = getFirstFoundEnvTestBinaryDir()
+	if os.Getenv("KUBEBUILDER_ASSETS") == "" {
+		if assetsDir := firstFoundEnvTestBinaryDir(filepath.Join(repoRoot, "bin", "k8s")); assetsDir != "" {
+			testEnv.BinaryAssetsDirectory = assetsDir
+		}
 	}
 
 	// cfg is defined in this file globally.
@@ -94,7 +100,25 @@ var _ = ginkgo.AfterSuite(func() {
 	}, time.Minute, time.Second).Should(gomega.Succeed())
 })
 
-// getFirstFoundEnvTestBinaryDir locates the first binary in the specified path.
+func findRepoRoot() (string, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir, nil
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "", fmt.Errorf("unable to locate repository root (go.mod)")
+		}
+		dir = parent
+	}
+}
+
+// firstFoundEnvTestBinaryDir locates the first binary in the specified path.
 // ENVTEST-based tests depend on specific binaries, usually located in paths set by
 // controller-runtime. When running tests directly (e.g., via an IDE) without using
 // Makefile targets, the 'BinaryAssetsDirectory' must be explicitly configured.
@@ -102,8 +126,11 @@ var _ = ginkgo.AfterSuite(func() {
 // This function streamlines the process by finding the required binaries, similar to
 // setting the 'KUBEBUILDER_ASSETS' environment variable. To ensure the binaries are
 // properly set up, run 'make setup-envtest' beforehand.
-func getFirstFoundEnvTestBinaryDir() string {
-	basePath := filepath.Join("..", "..", "bin", "k8s")
+func firstFoundEnvTestBinaryDir(basePath string) string {
+	if stat, err := os.Stat(basePath); err != nil || !stat.IsDir() {
+		return ""
+	}
+
 	entries, err := os.ReadDir(basePath)
 	if err != nil {
 		logf.Log.Error(err, "Failed to read directory", "path", basePath)
