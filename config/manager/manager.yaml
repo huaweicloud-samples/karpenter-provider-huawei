@@ -58,14 +58,34 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
+      - args:
+        - --secure-listen-address=0.0.0.0:8443
+        - --upstream=http://127.0.0.1:8080/
+        - --logtostderr=true
+        - --v=0
+        image: gcr.io/kubebuilder/kube-rbac-proxy:v0.16.0
+        name: kube-rbac-proxy
+        ports:
+        - containerPort: 8443
+          name: https
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - "ALL"
       - command:
         - /manager
         args:
-          - --metrics-port=8443
+          - --metrics-port=8080
           - --health-probe-port=8081
         image: controller:latest
         name: manager
-        ports: []
+        ports:
+        - containerPort: 8080
+          name: http-metrics
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false
