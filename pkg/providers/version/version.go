@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package providers
+package version
 
 import (
 	"context"
@@ -30,19 +30,23 @@ import (
 )
 
 const (
-	// Karpenter's supported version of Kubernetes
+	// MinK8sVersion is Karpenter's supported minimum version of Kubernetes.
 	// If a user runs a karpenter image on a k8s version outside the min and max,
-	// One error message will be fired to notify
+	// one error message will be fired to notify.
 	MinK8sVersion = "1.26"
+
+	// MaxK8sVersion is Karpenter's supported maximum version of Kubernetes.
 	MaxK8sVersion = "1.34"
 )
 
+// Provider provides the Kubernetes version discovered from the API server.
 type Provider interface {
 	Get(ctx context.Context) string
 }
 
-// DefaultProvider get the APIServer version. This will be initialized at start up and allows karpenter to have an understanding of the cluster version
-// for decision making. The version is cached to help reduce the amount of calls made to the API Server
+// DefaultProvider gets the APIServer version. This will be initialized at startup and allows karpenter to have an
+// understanding of the cluster version for decision making. The version is cached to help reduce the amount of calls
+// made to the API Server.
 type DefaultProvider struct {
 	cm                  *pretty.ChangeMonitor
 	kubernetesInterface kubernetes.Interface
@@ -56,7 +60,7 @@ func NewDefaultProvider(kubernetesInterface kubernetes.Interface) *DefaultProvid
 	}
 }
 
-func (p DefaultProvider) Get(ctx context.Context) string {
+func (p *DefaultProvider) Get(ctx context.Context) string {
 	return *p.version.Load()
 }
 
