@@ -12,7 +12,7 @@ import (
 // Operator is injected into the HuaweiCloud CloudProvider's factories
 type Operator struct {
 	*operator.Operator
-	VersionProvider version.Provider
+	VersionProvider *version.DefaultProvider
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {

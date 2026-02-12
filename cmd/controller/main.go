@@ -39,6 +39,7 @@ func main() {
 			op.GetClient(),
 			op.EventRecorder,
 			huaweicloudProvider,
+			op.VersionProvider,
 		)...).
 		Start(ctx)
 }
