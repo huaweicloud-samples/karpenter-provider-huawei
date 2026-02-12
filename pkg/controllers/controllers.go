@@ -19,13 +19,14 @@ package controllers
 import (
 	"context"
 
-	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/version"
 	"github.com/awslabs/operatorpkg/controller"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
+
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/version"
 
 	controllersversion "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/controllers/providers/version"
 )

@@ -21,12 +21,13 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/version"
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
+
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/version"
 )
 
 type UpdateVersion func(context.Context) error
