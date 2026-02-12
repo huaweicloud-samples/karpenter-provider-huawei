@@ -19,17 +19,22 @@ package controllers
 import (
 	"context"
 
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/version"
 	"github.com/awslabs/operatorpkg/controller"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
+
+	controllersversion "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/controllers/providers/version"
 )
 
 // NewControllers returns the list of controllers managed by this provider.
-func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock, kubeClient client.Client, recorder events.Recorder, _ cloudprovider.CloudProvider) []controller.Controller {
+func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock, kubeClient client.Client, recorder events.Recorder, _ cloudprovider.CloudProvider, versionProvider *version.DefaultProvider) []controller.Controller {
 
-	controllers := []controller.Controller{}
+	controllers := []controller.Controller{
+		controllersversion.NewController(versionProvider, versionProvider.UpdateVersionWithValidation),
+	}
 	return controllers
 }
