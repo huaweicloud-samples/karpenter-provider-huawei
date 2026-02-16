@@ -20,11 +20,14 @@ import (
 	"context"
 
 	"github.com/awslabs/operatorpkg/controller"
+	"github.com/awslabs/operatorpkg/status"
 	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
+
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/version"
 
@@ -36,6 +39,7 @@ func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock, k
 
 	controllers := []controller.Controller{
 		controllersversion.NewController(versionProvider, versionProvider.UpdateVersionWithValidation),
+		status.NewController[*v1alpha1.ECSNodeClass](kubeClient, mgr.GetEventRecorderFor("karpenter"), status.EmitDeprecatedMetrics),
 	}
 	return controllers
 }

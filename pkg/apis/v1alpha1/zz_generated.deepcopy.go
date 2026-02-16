@@ -21,7 +21,7 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/awslabs/operatorpkg/status"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
 
@@ -109,7 +109,7 @@ func (in *ECSNodeClassStatus) DeepCopyInto(out *ECSNodeClassStatus) {
 	*out = *in
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
-		*out = make([]v1.Condition, len(*in))
+		*out = make([]status.Condition, len(*in))
 		for i := range *in {
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}

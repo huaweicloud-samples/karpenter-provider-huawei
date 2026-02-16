@@ -1,5 +1,5 @@
 /*
-Copyright 2026.
+Copyright 2024 The CloudPilot AI Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,23 +14,25 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package v1alpha1 contains API Schema definitions for the karpenter v1alpha1 API group.
-// +kubebuilder:object:generate=true
+// +k8s:openapi-gen=true
+// +k8s:deepcopy-gen=package,register
+// +k8s:defaulter-gen=TypeMeta
 // +groupName=karpenter.k8s.huawei
-package v1alpha1
+package v1alpha1 // doc.go is discovered by codegen
 
 import (
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"sigs.k8s.io/controller-runtime/pkg/scheme"
+	"k8s.io/client-go/kubernetes/scheme"
+
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis"
 )
 
-var (
-	// GroupVersion is group version used to register these objects.
-	GroupVersion = schema.GroupVersion{Group: "karpenter.k8s.huawei", Version: "v1alpha1"}
-
-	// SchemeBuilder is used to add go types to the GroupVersionKind scheme.
-	SchemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
-
-	// AddToScheme adds the types in this group-version to the given scheme.
-	AddToScheme = SchemeBuilder.AddToScheme
-)
+func init() {
+	gv := schema.GroupVersion{Group: apis.Group, Version: "v1alpha1"}
+	metav1.AddToGroupVersion(scheme.Scheme, gv)
+	scheme.Scheme.AddKnownTypes(gv,
+		&ECSNodeClass{},
+		&ECSNodeClassList{},
+	)
+}
