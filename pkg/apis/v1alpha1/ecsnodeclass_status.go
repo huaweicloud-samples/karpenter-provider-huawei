@@ -21,28 +21,17 @@ import (
 )
 
 const (
+	ConditionTypeSubnetsReady        = "SubnetsReady"
 	ConditionTypeValidationSucceeded = "ValidationSucceeded"
 )
 
 // ECSNodeClassStatus defines the observed state of ECSNodeClass.
 type ECSNodeClassStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
-	// conditions represent the current state of the ECSNodeClass resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
-	// +listType=map
-	// +listMapKey=type
+	// Subnets contains the current subnet values that are available to the
+	// cluster under the subnet selectors.
+	// +optional
+	Subnets []Subnet `json:"subnets,omitempty"`
+	// Conditions contains signals for health and readiness
 	// +optional
 	Conditions []status.Condition `json:"conditions,omitempty"`
 }
@@ -58,6 +47,20 @@ func (in *ECSNodeClass) SetConditions(conditions []status.Condition) {
 func (in *ECSNodeClass) StatusConditions() status.ConditionSet {
 	conds := []string{
 		ConditionTypeValidationSucceeded,
+		ConditionTypeSubnetsReady,
 	}
 	return status.NewReadyConditions(conds...).For(in)
+}
+
+// Subnet contains resolved Subnet selector values utilized for node launch
+type Subnet struct {
+	// ID of the subnet
+	// +required
+	ID string `json:"id"`
+	// The associated availability zone
+	// +required
+	Zone string `json:"zone"`
+	// The associated availability zone ID
+	// +optional
+	ZoneID string `json:"zoneID,omitempty"`
 }

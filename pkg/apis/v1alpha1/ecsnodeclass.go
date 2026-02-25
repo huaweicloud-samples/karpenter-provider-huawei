@@ -30,9 +30,12 @@ type ECSNodeClassSpec struct {
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 
-	// foo is an example field of ECSNodeClass. Edit ecsnodeclass_types.go to remove/update
-	// +optional
-	Foo *string `json:"foo,omitempty"`
+	// SubnetSelectorTerms is a list of subnet selector terms. The terms are ORed.
+	// +kubebuilder:validation:XValidation:message="subnetSelectorTerms cannot be empty",rule="self.size() != 0"
+	// +kubebuilder:validation:XValidation:message="expected at least one, got none, ['name', 'id']",rule="self.all(x, has(x.name) || has(x.id))"
+	// +kubebuilder:validation:MaxItems:=30
+	// +required
+	SubnetSelectorTerms []SubnetSelectorTerm `json:"subnetSelectorTerms" hash:"ignore"`
 }
 
 // +kubebuilder:object:root=true
@@ -62,4 +65,17 @@ type ECSNodeClassList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []ECSNodeClass `json:"items"`
+}
+
+// SubnetSelectorTerm defines selection logic for a subnet used by Karpenter to launch nodes.
+// If multiple fields are used for selection, the requirements are ANDed.
+type SubnetSelectorTerm struct {
+	// ID is the subnet id in ECS
+	// +kubebuilder:validation:Pattern="subnet-[0-9a-z]+"
+	// +optional
+	ID string `json:"id,omitempty"`
+	// Name is the subnet id in ECS
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	Name string `json:"name,omitempty"`
 }
