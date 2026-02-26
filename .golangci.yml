@@ -23,7 +23,6 @@ linters:
         - name: error-strings
         - name: error-naming
         - name: increment-decrement
-        - name: var-naming
         - name: range
         - name: receiver-naming
         - name: time-naming
