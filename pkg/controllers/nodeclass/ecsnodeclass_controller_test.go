@@ -51,7 +51,11 @@ var _ = ginkgo.Describe("ECSNodeClass Controller", func() {
 						Name:      resourceName,
 						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: karpenterv1alpha1.ECSNodeClassSpec{
+						SubnetSelectorTerms: []karpenterv1alpha1.SubnetSelectorTerm{
+							{ID: "subnet-123"},
+						},
+					},
 				}
 				gomega.Expect(k8sClient.Create(ctx, resource)).To(gomega.Succeed())
 			}

@@ -22,9 +22,6 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
-	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
-	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/utils"
 	"github.com/awslabs/operatorpkg/serrors"
 	cms "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cms/v1/model"
 	vpcMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/model"
@@ -36,6 +33,10 @@ import (
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 	"sigs.k8s.io/karpenter/pkg/utils/pretty"
+
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
+	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/utils"
 )
 
 type Provider interface {
