@@ -21,11 +21,13 @@ import (
 
 	"github.com/awslabs/operatorpkg/controller"
 	"github.com/awslabs/operatorpkg/status"
-	"k8s.io/utils/clock"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
+
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/controllers/nodeclass"
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/subnet"
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
 
@@ -35,11 +37,19 @@ import (
 )
 
 // NewControllers returns the list of controllers managed by this provider.
-func NewControllers(ctx context.Context, mgr manager.Manager, clk clock.Clock, kubeClient client.Client, recorder events.Recorder, _ cloudprovider.CloudProvider, versionProvider *version.DefaultProvider) []controller.Controller {
-
+func NewControllers(
+	ctx context.Context,
+	mgr manager.Manager,
+	kubeClient client.Client,
+	recorder events.Recorder,
+	_ cloudprovider.CloudProvider,
+	versionProvider *version.DefaultProvider,
+	subnetProvider subnet.Provider,
+) []controller.Controller {
 	controllers := []controller.Controller{
 		controllersversion.NewController(versionProvider, versionProvider.UpdateVersionWithValidation),
 		status.NewController[*v1alpha1.ECSNodeClass](kubeClient, mgr.GetEventRecorderFor("karpenter"), status.EmitDeprecatedMetrics),
+		nodeclass.NewController(kubeClient, recorder, subnetProvider),
 	}
 	return controllers
 }

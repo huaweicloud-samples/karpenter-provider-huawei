@@ -37,11 +37,11 @@ func main() {
 		WithControllers(ctx, controllers.NewControllers(
 			ctx,
 			op.Manager,
-			op.Clock,
 			op.GetClient(),
 			op.EventRecorder,
 			huaweicloudProvider,
 			op.VersionProvider,
+			op.SubnetProvider,
 		)...).
 		Start(ctx)
 }
