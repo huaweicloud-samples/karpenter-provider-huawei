@@ -48,12 +48,11 @@ type Provider interface {
 
 type DefaultProvider struct {
 	sync.Mutex
-	ecsapi                        sdk.ECSAPI
-	cache                         *cache.Cache
-	availableIPAddressCache       *cache.Cache
-	associatePublicIPAddressCache *cache.Cache
-	cm                            *pretty.ChangeMonitor
-	inflightIPs                   map[string]int32
+	vpcapi                  sdk.VPCAPI
+	cache                   *cache.Cache
+	availableIPAddressCache *cache.Cache
+	cm                      *pretty.ChangeMonitor
+	inflightIPs             map[string]int32
 }
 
 type Subnet struct {
@@ -63,13 +62,12 @@ type Subnet struct {
 	AvailableIPAddressCount int32
 }
 
-func NewDefaultProvider(ecsapi sdk.ECSAPI, cache *cache.Cache, availableIPAddressCache *cache.Cache, associatePublicIPAddressCache *cache.Cache) Provider {
+func NewDefaultProvider(vpcapi sdk.VPCAPI, cache *cache.Cache, availableIPAddressCache *cache.Cache) Provider {
 	return &DefaultProvider{
-		ecsapi:                        ecsapi,
-		cache:                         cache,
-		availableIPAddressCache:       availableIPAddressCache,
-		associatePublicIPAddressCache: associatePublicIPAddressCache,
-		cm:                            pretty.NewChangeMonitor(),
+		vpcapi:                  vpcapi,
+		cache:                   cache,
+		availableIPAddressCache: availableIPAddressCache,
+		cm:                      pretty.NewChangeMonitor(),
 		// inflightIPs is used to track IPs from known launched instances
 		inflightIPs: map[string]int32{},
 	}
@@ -99,7 +97,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ECSNodeC
 	}
 	// Ensure that all the subnets that are returned here are unique
 	subnets := map[string]vpcMdl.Subnet{}
-	response, err := p.ecsapi.ListSubnets(&vpcMdl.ListSubnetsRequest{
+	response, err := p.vpcapi.ListSubnets(&vpcMdl.ListSubnetsRequest{
 		Limit: lo.ToPtr(int32(500)),
 	})
 	if err != nil {
@@ -159,7 +157,7 @@ func (p *DefaultProvider) ZonalSubnetsForLaunch(ctx context.Context, nodeClass *
 				continue
 			}
 		}
-		zonalSubnets[subnet.Zone] = &Subnet{ID: subnet.ID, Zone: subnet.Zone, ZoneID: subnet.ZoneID, AvailableIPAddressCount: availableIPAddressCount[subnet.ID]}
+		zonalSubnets[subnet.Zone] = &Subnet{ID: subnet.ID, Zone: subnet.Zone, AvailableIPAddressCount: availableIPAddressCount[subnet.ID]}
 	}
 	for _, subnet := range zonalSubnets {
 		predictedIPsUsed := p.minPods(instanceTypes, scheduling.NewRequirements(

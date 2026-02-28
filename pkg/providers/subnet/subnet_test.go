@@ -127,8 +127,7 @@ func TestUpdateInflightIPs_ReleasesReservationsInSteps(t *testing.T) {
 func newTestProvider() *DefaultProvider {
 	c := cache.New(5*time.Minute, 10*time.Minute)
 	available := cache.New(5*time.Minute, 10*time.Minute)
-	associate := cache.New(5*time.Minute, 10*time.Minute)
-	return NewDefaultProvider(nil, c, available, associate).(*DefaultProvider)
+	return NewDefaultProvider(nil, c, available).(*DefaultProvider)
 }
 
 func newTestInstanceType(zone, capacityType string, pods int64) *cloudprovider.InstanceType {
