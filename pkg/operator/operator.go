@@ -24,12 +24,12 @@ import (
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/basic"
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/config"
-	vpc "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2"
-	"github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/region"
+	vpcRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/region"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	"sigs.k8s.io/karpenter/pkg/operator"
 
+	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/subnet"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/version"
 )
@@ -55,7 +55,7 @@ type Operator struct {
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
 	reg := os.Getenv("HUAWEICLOUD_REGION")
-	region, err := region.SafeValueOf(reg)
+	region, err := vpcRegion.SafeValueOf(reg)
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get region: %w", err))
 	}
@@ -67,20 +67,20 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	if sk == "" {
 		lo.Must0(fmt.Errorf("unable to get credentials"))
 	}
-	credentials, err := basic.NewCredentialsBuilder().
+	credentialsBuilder := basic.NewCredentialsBuilder().
 		WithAk(ak).
-		WithSk(sk).
-		SafeBuild()
+		WithSk(sk)
+	if projectID := os.Getenv("HUAWEICLOUD_PROJECT_ID"); projectID != "" {
+		credentialsBuilder.WithProjectId(projectID)
+	}
+	credentials, err := credentialsBuilder.SafeBuild()
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get credentials"))
 	}
-	vpcHCHttpCli := vpc.VpcClientBuilder().
-		WithRegion(region).
-		WithCredential(credentials).
-		WithHttpConfig(config.DefaultHttpConfig()).
-		Build()
-	vpcApi := vpc.NewVpcClient(vpcHCHttpCli)
+
+	vpcApi := sdk.NewVPCService(region, credentials, config.DefaultHttpConfig())
 	subnetProvider := subnet.NewDefaultProvider(vpcApi, cache.New(DefaultTTL, DefaultCleanupInterval), cache.New(AvailableIPAddressTTL, DefaultCleanupInterval))
+
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)
 	lo.Must0(versionProvider.UpdateVersionWithValidation(ctx))
 	return ctx, &Operator{
