@@ -74,14 +74,11 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get credentials"))
 	}
-	vpcHCHttpCli, err := vpc.VpcClientBuilder().
+	vpcHCHttpCli := vpc.VpcClientBuilder().
 		WithRegion(region).
 		WithCredential(credentials).
 		WithHttpConfig(config.DefaultHttpConfig()).
-		SafeBuild()
-	if err != nil {
-		lo.Must0(fmt.Errorf("unable to get credentials"))
-	}
+		Build()
 	vpcApi := vpc.NewVpcClient(vpcHCHttpCli)
 	subnetProvider := subnet.NewDefaultProvider(vpcApi, cache.New(DefaultTTL, DefaultCleanupInterval), cache.New(AvailableIPAddressTTL, DefaultCleanupInterval))
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)

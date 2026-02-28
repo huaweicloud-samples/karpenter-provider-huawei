@@ -68,6 +68,16 @@ var _ = Describe("Manager", Ordered, func() {
 		_, err = utils.Run(cmd)
 		Expect(err).NotTo(HaveOccurred(), "Failed to install CRDs")
 
+		By("creating dummy Huawei credentials secret")
+		cmd = exec.Command("kubectl", "create", "secret", "generic", "huawei-credentials",
+			"--from-literal=HUAWEICLOUD_REGION=cn-north-4",
+			"--from-literal=HUAWEICLOUD_AK=fake-ak",
+			"--from-literal=HUAWEICLOUD_SK=fake-sk",
+			"-n", namespace,
+		)
+		_, err = utils.Run(cmd)
+		Expect(err).NotTo(HaveOccurred(), "Failed to create dummy Huawei credentials secret")
+
 		By("deploying the controller-manager")
 		cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage))
 		_, err = utils.Run(cmd)
