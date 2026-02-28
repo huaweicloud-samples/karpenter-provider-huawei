@@ -84,8 +84,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ECSNodeC
 	p.Lock()
 	defer p.Unlock()
 
-	subnetIds, subnetNames := getSubnetFilter(nodeClass.Spec.SubnetSelectorTerms)
-	if len(subnetIds) == 0 {
+	if len(nodeClass.Spec.SubnetSelectorTerms) == 0 {
 		return []vpcMdl.Subnet{}, nil
 	}
 	hash := utils.GetNodeClassHash(nodeClass)
@@ -101,13 +100,14 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ECSNodeC
 		Limit: lo.ToPtr(int32(500)),
 	})
 	if err != nil {
-		return nil, serrors.Wrap(fmt.Errorf("list subnets, %w", err), "subnetIds", lo.Keys(subnetIds))
+		return nil, serrors.Wrap(
+			fmt.Errorf("list subnets, %w", err),
+			"subnetSelectorTerms", nodeClass.Spec.SubnetSelectorTerms,
+			"nodeClass", nodeClass.Name,
+		)
 	}
 	for _, subnet := range lo.FromPtr(response.Subnets) {
-		if _, ok := subnetIds[subnet.Id]; !ok {
-			continue
-		}
-		if _, ok := subnetNames[subnet.Name]; !ok {
+		if !matchesSubnetSelectorTerms(subnet, nodeClass.Spec.SubnetSelectorTerms) {
 			continue
 		}
 		subnets[subnet.Id] = subnet
@@ -125,6 +125,28 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ECSNodeC
 			})).V(1).Info("discovered subnets")
 	}
 	return lo.Values(subnets), nil
+}
+
+func matchesSubnetSelectorTerm(subnet vpcMdl.Subnet, term v1alpha1.SubnetSelectorTerm) bool {
+	if term.ID == "" && term.Name == "" {
+		return false
+	}
+	if term.ID != "" && subnet.Id != term.ID {
+		return false
+	}
+	if term.Name != "" && subnet.Name != term.Name {
+		return false
+	}
+	return true
+}
+
+func matchesSubnetSelectorTerms(subnet vpcMdl.Subnet, terms []v1alpha1.SubnetSelectorTerm) bool {
+	for _, term := range terms {
+		if matchesSubnetSelectorTerm(subnet, term) {
+			return true
+		}
+	}
+	return false
 }
 
 // ZonalSubnetsForLaunch returns a mapping of zone to the subnet with the most available IP addresses and deducts the passed ips from the available count
@@ -209,16 +231,6 @@ func (p *DefaultProvider) UpdateInflightIPs(request *cms.CreateAutoLaunchGroupRe
 		}
 		p.inflightIPs[subnet.ID] = updated
 	}
-}
-
-func getSubnetFilter(terms []v1alpha1.SubnetSelectorTerm) (subnetIds map[string]struct{}, subnetNames map[string]struct{}) {
-	subnetIds = make(map[string]struct{}, len(terms))
-	subnetNames = make(map[string]struct{}, len(terms))
-	for _, subnetSelectorTerm := range terms {
-		subnetIds[subnetSelectorTerm.ID] = struct{}{}
-		subnetNames[subnetSelectorTerm.Name] = struct{}{}
-	}
-	return
 }
 
 func (p *DefaultProvider) minPods(instanceTypes []*cloudprovider.InstanceType, reqs scheduling.Requirements) int32 {
