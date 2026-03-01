@@ -34,9 +34,13 @@ type ECSAPI interface {
 	ListServersDetails(request *ecs.ListServersDetailsRequest) (*ecs.ListServersDetailsResponse, error)
 	BatchCreateServerTags(request *ecs.BatchCreateServerTagsRequest) (*ecs.BatchCreateServerTagsResponse, error)
 	ListFlavors(request *cse.ListFlavorsRequest) (*cse.ListFlavorsResponse, error)
+	ListImages(request *ims.ListImagesRequest) (*ims.ListImagesResponse, error)
+}
+
+// VPCAPI abstracts the subset of Huawei Cloud VPC-related APIs used by this project.
+type VPCAPI interface {
 	ListSubnets(request *vpc.ListSubnetsRequest) (*vpc.ListSubnetsResponse, error)
 	ListSecurityGroups(request *vpc.ListSecurityGroupsRequest) (*vpc.ListSecurityGroupsResponse, error)
-	ListImages(request *ims.ListImagesRequest) (*ims.ListImagesResponse, error)
 }
 
 // CCEAPI abstracts the subset of Huawei Cloud CCE APIs used by this project.

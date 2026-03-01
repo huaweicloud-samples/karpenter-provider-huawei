@@ -14,31 +14,24 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package utils
+package nodeclass
 
 import (
 	"fmt"
-	"strings"
+
+	corev1 "k8s.io/api/core/v1"
+	"sigs.k8s.io/karpenter/pkg/events"
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/utils"
 )
 
-// PrettySlice truncates a slice after a certain number of max items to ensure
-// that the Slice isn't too long
-func PrettySlice[T any](s []T, maxItems int) string {
-	var sb strings.Builder
-	for i, elem := range s {
-		if i > maxItems-1 {
-			fmt.Fprintf(&sb, " and %d other(s)", len(s)-i)
-			break
-		} else if i > 0 {
-			fmt.Fprint(&sb, ", ")
-		}
-		fmt.Fprint(&sb, elem)
+func WaitingOnNodeClaimTerminationEvent(nodeClass *v1alpha1.ECSNodeClass, names []string) events.Event {
+	return events.Event{
+		InvolvedObject: nodeClass,
+		Type:           corev1.EventTypeNormal,
+		Reason:         "WaitingOnNodeClaimTermination",
+		Message:        fmt.Sprintf("Waiting on NodeClaim termination for %s", utils.PrettySlice(names, 5)),
+		DedupeValues:   []string{string(nodeClass.UID)},
 	}
-	return sb.String()
-}
-
-func GetNodeClassHash(nodeClass *v1alpha1.ECSNodeClass) string {
-	return fmt.Sprintf("%s-%d", nodeClass.UID, nodeClass.Generation)
 }

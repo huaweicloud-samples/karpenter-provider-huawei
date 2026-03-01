@@ -60,7 +60,4 @@ type Subnet struct {
 	// The associated availability zone
 	// +required
 	Zone string `json:"zone"`
-	// The associated availability zone ID
-	// +optional
-	ZoneID string `json:"zoneID,omitempty"`
 }

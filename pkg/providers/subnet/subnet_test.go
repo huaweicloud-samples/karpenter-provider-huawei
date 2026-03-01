@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	vpcMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/model"
 	"github.com/patrickmn/go-cache"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -29,6 +30,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
+	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
 )
 
 func TestUpdateInflightIPs_ReleasesSingleReservationBackToBaseline(t *testing.T) {
@@ -124,11 +126,171 @@ func TestUpdateInflightIPs_ReleasesReservationsInSteps(t *testing.T) {
 	}
 }
 
+func TestList_MatchesIDOnly(t *testing.T) {
+	ctx := context.Background()
+
+	vpcapi := &fakeVPCAPI{
+		subnets: []vpcMdl.Subnet{
+			{Id: "subnet-123", Name: "subnet-a", AvailabilityZone: "zone-a", AvailableIpAddressCount: 10},
+			{Id: "subnet-456", Name: "subnet-b", AvailabilityZone: "zone-b", AvailableIpAddressCount: 20},
+		},
+	}
+	p := newTestProviderWithVPC(vpcapi)
+	nodeClass := &v1alpha1.ECSNodeClass{
+		Spec: v1alpha1.ECSNodeClassSpec{
+			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
+				{ID: "subnet-123"},
+			},
+		},
+	}
+
+	got, err := p.List(ctx, nodeClass)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	assertSubnetIDs(t, got, "subnet-123")
+}
+
+func TestList_MatchesNameOnly(t *testing.T) {
+	ctx := context.Background()
+
+	vpcapi := &fakeVPCAPI{
+		subnets: []vpcMdl.Subnet{
+			{Id: "subnet-123", Name: "subnet-a", AvailabilityZone: "zone-a", AvailableIpAddressCount: 10},
+			{Id: "subnet-456", Name: "subnet-b", AvailabilityZone: "zone-b", AvailableIpAddressCount: 20},
+		},
+	}
+	p := newTestProviderWithVPC(vpcapi)
+	nodeClass := &v1alpha1.ECSNodeClass{
+		Spec: v1alpha1.ECSNodeClassSpec{
+			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
+				{Name: "subnet-b"},
+			},
+		},
+	}
+
+	got, err := p.List(ctx, nodeClass)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	assertSubnetIDs(t, got, "subnet-456")
+}
+
+func TestList_MatchesIDAndName(t *testing.T) {
+	ctx := context.Background()
+
+	vpcapi := &fakeVPCAPI{
+		subnets: []vpcMdl.Subnet{
+			{Id: "subnet-123", Name: "subnet-a", AvailabilityZone: "zone-a", AvailableIpAddressCount: 10},
+			{Id: "subnet-456", Name: "subnet-a", AvailabilityZone: "zone-b", AvailableIpAddressCount: 20},
+		},
+	}
+	p := newTestProviderWithVPC(vpcapi)
+	nodeClass := &v1alpha1.ECSNodeClass{
+		Spec: v1alpha1.ECSNodeClassSpec{
+			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
+				{ID: "subnet-123", Name: "subnet-a"},
+			},
+		},
+	}
+
+	got, err := p.List(ctx, nodeClass)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	assertSubnetIDs(t, got, "subnet-123")
+}
+
+func TestList_MatchesIDAndNameRequiresBoth(t *testing.T) {
+	ctx := context.Background()
+
+	vpcapi := &fakeVPCAPI{
+		subnets: []vpcMdl.Subnet{
+			{Id: "subnet-123", Name: "subnet-b", AvailabilityZone: "zone-a", AvailableIpAddressCount: 10},
+		},
+	}
+	p := newTestProviderWithVPC(vpcapi)
+	nodeClass := &v1alpha1.ECSNodeClass{
+		Spec: v1alpha1.ECSNodeClassSpec{
+			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
+				{ID: "subnet-123", Name: "subnet-a"},
+			},
+		},
+	}
+
+	got, err := p.List(ctx, nodeClass)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	assertSubnetIDs(t, got)
+}
+
+func TestList_MatchesMultipleTermsOR(t *testing.T) {
+	ctx := context.Background()
+
+	vpcapi := &fakeVPCAPI{
+		subnets: []vpcMdl.Subnet{
+			{Id: "subnet-123", Name: "subnet-a", AvailabilityZone: "zone-a", AvailableIpAddressCount: 10},
+			{Id: "subnet-456", Name: "subnet-b", AvailabilityZone: "zone-b", AvailableIpAddressCount: 20},
+		},
+	}
+	p := newTestProviderWithVPC(vpcapi)
+	nodeClass := &v1alpha1.ECSNodeClass{
+		Spec: v1alpha1.ECSNodeClassSpec{
+			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
+				{ID: "subnet-123"},
+				{Name: "subnet-b"},
+			},
+		},
+	}
+
+	got, err := p.List(ctx, nodeClass)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	assertSubnetIDs(t, got, "subnet-123", "subnet-456")
+}
+
+func TestList_DedupesWhenMultipleTermsMatchSameSubnet(t *testing.T) {
+	ctx := context.Background()
+
+	vpcapi := &fakeVPCAPI{
+		subnets: []vpcMdl.Subnet{
+			{Id: "subnet-123", Name: "subnet-a", AvailabilityZone: "zone-a", AvailableIpAddressCount: 10},
+		},
+	}
+	p := newTestProviderWithVPC(vpcapi)
+	nodeClass := &v1alpha1.ECSNodeClass{
+		Spec: v1alpha1.ECSNodeClassSpec{
+			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
+				{ID: "subnet-123"},
+				{Name: "subnet-a"},
+			},
+		},
+	}
+
+	_, err := p.List(ctx, nodeClass)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	got, err := p.List(ctx, nodeClass)
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	assertSubnetIDs(t, got, "subnet-123")
+	if vpcapi.listSubnetsCalls != 1 {
+		t.Fatalf("expected ListSubnets called once due to caching, got %d", vpcapi.listSubnetsCalls)
+	}
+}
+
 func newTestProvider() *DefaultProvider {
+	return newTestProviderWithVPC(nil)
+}
+
+func newTestProviderWithVPC(vpcapi sdk.VPCAPI) *DefaultProvider {
 	c := cache.New(5*time.Minute, 10*time.Minute)
 	available := cache.New(5*time.Minute, 10*time.Minute)
-	associate := cache.New(5*time.Minute, 10*time.Minute)
-	return NewDefaultProvider(nil, c, available, associate).(*DefaultProvider)
+	return NewDefaultProvider(vpcapi, c, available).(*DefaultProvider)
 }
 
 func newTestInstanceType(zone, capacityType string, pods int64) *cloudprovider.InstanceType {
@@ -147,5 +309,40 @@ func newTestInstanceType(zone, capacityType string, pods int64) *cloudprovider.I
 		Capacity: corev1.ResourceList{
 			corev1.ResourcePods: *resource.NewQuantity(pods, resource.DecimalSI),
 		},
+	}
+}
+
+type fakeVPCAPI struct {
+	subnets          []vpcMdl.Subnet
+	listSubnetsCalls int
+}
+
+func (f *fakeVPCAPI) ListSubnets(_ *vpcMdl.ListSubnetsRequest) (*vpcMdl.ListSubnetsResponse, error) {
+	f.listSubnetsCalls++
+	subnetsCopy := append([]vpcMdl.Subnet{}, f.subnets...)
+	return &vpcMdl.ListSubnetsResponse{Subnets: &subnetsCopy}, nil
+}
+
+func (f *fakeVPCAPI) ListSecurityGroups(_ *vpcMdl.ListSecurityGroupsRequest) (*vpcMdl.ListSecurityGroupsResponse, error) {
+	return &vpcMdl.ListSecurityGroupsResponse{}, nil
+}
+
+func assertSubnetIDs(t *testing.T, subnets []vpcMdl.Subnet, wantIDs ...string) {
+	t.Helper()
+
+	gotIDs := map[string]struct{}{}
+	for _, s := range subnets {
+		gotIDs[s.Id] = struct{}{}
+	}
+	if len(gotIDs) != len(subnets) {
+		t.Fatalf("expected deduped subnets by ID, got %d items with %d unique IDs", len(subnets), len(gotIDs))
+	}
+	if len(subnets) != len(wantIDs) {
+		t.Fatalf("expected %d subnets, got %d (%v)", len(wantIDs), len(subnets), subnets)
+	}
+	for _, id := range wantIDs {
+		if _, ok := gotIDs[id]; !ok {
+			t.Fatalf("expected subnet ID %q in results, got %v", id, subnets)
+		}
 	}
 }
