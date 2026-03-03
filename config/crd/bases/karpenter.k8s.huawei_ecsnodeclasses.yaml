@@ -49,7 +49,7 @@ spec:
                   properties:
                     id:
                       description: ID is the subnet id in ECS
-                      pattern: subnet-[0-9a-z]+
+                      pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
                       type: string
                     name:
                       description: Name is the subnet id in ECS

@@ -71,7 +71,7 @@ type ECSNodeClassList struct {
 // If multiple fields are used for selection, the requirements are ANDed.
 type SubnetSelectorTerm struct {
 	// ID is the subnet id in ECS
-	// +kubebuilder:validation:Pattern="subnet-[0-9a-z]+"
+	// +kubebuilder:validation:Pattern="^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 	// +optional
 	ID string `json:"id,omitempty"`
 	// Name is the subnet id in ECS

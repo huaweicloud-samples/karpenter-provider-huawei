@@ -58,7 +58,6 @@ type DefaultProvider struct {
 type Subnet struct {
 	ID                      string
 	Zone                    string
-	ZoneID                  string
 	AvailableIPAddressCount int32
 }
 
