@@ -17,9 +17,10 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis"
 	corev1 "k8s.io/api/core/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis"
 )
 
 var (
