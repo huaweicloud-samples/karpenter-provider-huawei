@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"github.com/awslabs/operatorpkg/status"
+	"github.com/samber/lo"
 )
 
 const (
@@ -60,4 +61,10 @@ type Subnet struct {
 	// The associated availability zone
 	// +required
 	Zone string `json:"zone"`
+}
+
+func (in *ECSNodeClass) Zones() []string {
+	return lo.Map(in.Status.Subnets, func(_ Subnet, i int) string {
+		return in.Status.Subnets[i].Zone
+	})
 }
