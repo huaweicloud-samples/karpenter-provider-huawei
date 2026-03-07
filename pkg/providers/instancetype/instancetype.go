@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 
+	"github.com/awslabs/operatorpkg/serrors"
 	ecsMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/model"
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/patrickmn/go-cache"
@@ -29,6 +31,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -51,15 +54,18 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
+	muFetch       sync.Mutex
+	fetchDone     bool
+	instanceTypes []ecsMdl.Flavor
+
 	ecsapi                sdk.ECSAPI
 	instanceTypesResolver Resolver
 
-	muInstanceTypesInfo sync.RWMutex
-	instanceTypesInfo   map[InstanceType]ecsMdl.Flavor
+	muInstanceTypes   sync.RWMutex
+	instanceTypesInfo map[InstanceType]ecsMdl.Flavor
 
-	muInstanceTypesOfferings sync.RWMutex
-	instanceTypesOfferings   map[InstanceType]sets.Set[string]
-	allZones                 sets.Set[string]
+	instanceTypesOfferings map[InstanceType]sets.Set[string]
+	allZones               sets.Set[string]
 
 	instanceTypesCache      *cache.Cache
 	discoveredCapacityCache *cache.Cache
@@ -80,10 +86,8 @@ func NewDefaultProvider(
 }
 
 func (p *DefaultProvider) Get(ctx context.Context, nodeClass NodeClass, name InstanceType) (*cloudprovider.InstanceType, error) {
-	p.muInstanceTypesInfo.RLock()
-	p.muInstanceTypesOfferings.RLock()
-	defer p.muInstanceTypesInfo.RUnlock()
-	defer p.muInstanceTypesOfferings.RUnlock()
+	p.muInstanceTypes.RLock()
+	defer p.muInstanceTypes.RUnlock()
 
 	if len(p.instanceTypesInfo) == 0 {
 		return nil, fmt.Errorf("no instance types found")
@@ -117,10 +121,8 @@ func (p *DefaultProvider) Get(ctx context.Context, nodeClass NodeClass, name Ins
 }
 
 func (p *DefaultProvider) List(ctx context.Context, nodeClass NodeClass) ([]*cloudprovider.InstanceType, error) {
-	p.muInstanceTypesInfo.RLock()
-	p.muInstanceTypesOfferings.RLock()
-	defer p.muInstanceTypesInfo.RUnlock()
-	defer p.muInstanceTypesOfferings.RUnlock()
+	p.muInstanceTypes.RLock()
+	defer p.muInstanceTypes.RUnlock()
 
 	if len(p.instanceTypesInfo) == 0 {
 		return nil, fmt.Errorf("no instance types found")
@@ -250,4 +252,168 @@ func (p *DefaultProvider) createOfferings(
 		}
 	}
 	return offerings
+}
+
+func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
+	p.muInstanceTypes.Lock()
+	defer p.muInstanceTypes.Unlock()
+	instanceTypes, err := p.fetchInstanceTypes()
+	if err != nil {
+		return err
+	}
+	if p.cm.HasChanged("instance-types", instanceTypes) {
+		// Only update instanceTypesSeqNum with the instance types have been changed
+		// This is to not create new keys with duplicate instance types option
+		p.instanceTypesCache.Flush() // None of the cached instance type info is valid when the instance type info changes
+		log.FromContext(ctx).WithValues("count", len(instanceTypes)).V(1).Info("discovered instance types")
+	}
+	p.instanceTypesInfo = lo.SliceToMap(instanceTypes, func(i ecsMdl.Flavor) (InstanceType, ecsMdl.Flavor) {
+		return InstanceType(i.Name), i
+	})
+	return nil
+}
+
+func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error {
+	p.muInstanceTypes.Lock()
+	defer p.muInstanceTypes.Unlock()
+
+	// Get offerings from ECS
+	instanceTypeOfferings := map[InstanceType]sets.Set[string]{}
+
+	instanceTypes, err := p.fetchInstanceTypes()
+	if err != nil {
+		return err
+	}
+
+	zoneUniverse := sets.New[string]()
+	for _, instanceType := range instanceTypes {
+		if instanceType.OsExtraSpecs == nil || instanceType.OsExtraSpecs.Condoperationaz == nil {
+			continue
+		}
+		for zone := range parseCondOperationAZ(*instanceType.OsExtraSpecs.Condoperationaz) {
+			zoneUniverse.Insert(zone)
+		}
+	}
+
+	for _, instanceType := range instanceTypes {
+		instanceTypeOfferings[InstanceType(instanceType.Name)] = resolveOfferingZones(zoneUniverse, instanceType.OsExtraSpecs)
+	}
+
+	if p.cm.HasChanged("instance-type-offering", instanceTypeOfferings) {
+		// Only update instanceTypesSeqNun with the instance type offerings  have been changed
+		// This is to not create new keys with duplicate instance type offerings option
+		p.instanceTypesCache.Flush() // None of the cached instance type info is valid when the instance type offerings info changes
+		log.FromContext(ctx).WithValues("instance-type-count", len(instanceTypeOfferings)).V(1).Info("discovered offerings for instance types")
+	}
+	p.instanceTypesOfferings = instanceTypeOfferings
+
+	allZones := sets.New[string]()
+	for _, offeringZones := range instanceTypeOfferings {
+		for zone := range offeringZones {
+			allZones.Insert(zone)
+		}
+	}
+
+	if p.cm.HasChanged("zones", allZones) {
+		log.FromContext(ctx).WithValues("zones", allZones.UnsortedList()).V(1).Info("discovered zones")
+	}
+	p.allZones = allZones
+	return nil
+}
+
+func resolveOfferingZones(zoneUniverse sets.Set[string], extraSpecs *ecsMdl.FlavorExtraSpec) sets.Set[string] {
+	defaultStatus := "normal"
+	if extraSpecs != nil && extraSpecs.Condoperationstatus != nil && strings.TrimSpace(*extraSpecs.Condoperationstatus) != "" {
+		defaultStatus = *extraSpecs.Condoperationstatus
+	}
+	defaultAvailable := condOperationStatusAvailable(defaultStatus)
+
+	azOverrides := map[string]string{}
+	if extraSpecs != nil && extraSpecs.Condoperationaz != nil && strings.TrimSpace(*extraSpecs.Condoperationaz) != "" {
+		azOverrides = parseCondOperationAZ(*extraSpecs.Condoperationaz)
+	}
+
+	zones := sets.New[string]()
+	if defaultAvailable {
+		for zone := range zoneUniverse {
+			zones.Insert(zone)
+		}
+	}
+	for zone, status := range azOverrides {
+		if condOperationStatusAvailable(status) {
+			zones.Insert(zone)
+			continue
+		}
+		zones.Delete(zone)
+	}
+	return zones
+}
+
+func condOperationStatusAvailable(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "", "normal", "promotion", "obt":
+		return true
+	case "abandon", "sellout":
+		return false
+	default:
+		// Be permissive by default to avoid accidentally filtering out valid offerings.
+		return true
+	}
+}
+
+func parseCondOperationAZ(condOperationAZ string) map[string]string {
+	normalized := strings.NewReplacer("，", ",", "；", ",", ";", ",", "（", "(", "）", ")").Replace(condOperationAZ)
+
+	out := map[string]string{}
+	for _, part := range strings.Split(normalized, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		zone := part
+		status := ""
+		if openParen := strings.Index(part, "("); openParen != -1 {
+			if closeParen := strings.LastIndex(part, ")"); closeParen > openParen {
+				zone = strings.TrimSpace(part[:openParen])
+				status = strings.TrimSpace(part[openParen+1 : closeParen])
+			}
+		}
+		if zone == "" {
+			continue
+		}
+		out[zone] = status
+	}
+	return out
+}
+
+func (p *DefaultProvider) UpdateInstanceTypeCapacityFromNode(ctx context.Context, node *corev1.Node, nodeClaim *karpv1.NodeClaim, nodeClass NodeClass) error {
+	// Get mappings for most recent AMIs
+	instanceTypeName := node.Labels[corev1.LabelInstanceTypeStable]
+
+	key := discoveredCapacityCacheKey(instanceTypeName, nodeClass)
+	actualCapacity := node.Status.Capacity.Memory()
+	if cachedCapacity, ok := p.discoveredCapacityCache.Get(key); !ok || actualCapacity.Cmp(cachedCapacity.(resource.Quantity)) < 1 {
+		// Update the capacity in the cache if it is less than or equal to the current cached capacity. We update when it's equal to refresh the TTL.
+		p.discoveredCapacityCache.SetDefault(key, *actualCapacity)
+		// Only log if we haven't discovered the capacity for the instance type yet or the discovered capacity is **less** than the cached capacity
+		if !ok || actualCapacity.Cmp(cachedCapacity.(resource.Quantity)) < 0 {
+			log.FromContext(ctx).WithValues("memory-capacity", actualCapacity, "instance-type", instanceTypeName).V(1).Info("updating discovered capacity cache")
+		}
+	}
+	return nil
+}
+
+func (p *DefaultProvider) fetchInstanceTypes() ([]ecsMdl.Flavor, error) {
+	p.muFetch.Lock()
+	defer p.muFetch.Unlock()
+	if p.fetchDone {
+		return p.instanceTypes, nil
+	}
+	flavorsResponse, err := p.ecsapi.ListFlavors(&ecsMdl.ListFlavorsRequest{})
+	if err != nil {
+		return nil, serrors.Wrap(fmt.Errorf("list flavors, %w", err))
+	}
+	p.instanceTypes = *flavorsResponse.Flavors
+	p.fetchDone = true
+	return p.instanceTypes, nil
 }

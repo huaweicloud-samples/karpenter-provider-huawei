@@ -123,6 +123,9 @@ func computeRequirements(info ecsMdl.Flavor, region string, offeringZones []stri
 	// Available zones is the set intersection between zones where the instance type is available, and zones which are
 	// available via the provided ECSNodeClass.
 	availableZones := sets.New(offeringZones...).Intersection(sets.New(subnetZones...))
+	if len(offeringZones) == 0 {
+		availableZones = sets.New(subnetZones...)
+	}
 	requirements := scheduling.NewRequirements(
 		// Well Known Upstream
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, info.Name),
@@ -155,7 +158,7 @@ func computeCapacity(info ecsMdl.Flavor, maxPods *int32, podsPerCore *int32) cor
 }
 
 func getArchitecture(info ecsMdl.Flavor) string {
-	if info.OsExtraSpecs.EcsinstanceArchitecture == nil {
+	if info.OsExtraSpecs == nil || info.OsExtraSpecs.EcsinstanceArchitecture == nil {
 		return "amd64"
 	}
 	return *info.OsExtraSpecs.EcsinstanceArchitecture
