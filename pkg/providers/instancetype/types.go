@@ -44,11 +44,6 @@ const (
 	NodeFSAvailable           = "nodefs.available"
 )
 
-type NodeClass interface {
-	KubeletConfiguration() *v1alpha1.KubeletConfiguration
-	Zones() []string
-}
-
 type Resolver interface {
 	// CacheKey tells the InstanceType cache if something changes about the InstanceTypes or Offerings based on the NodeClass.
 	CacheKey(NodeClass) string
