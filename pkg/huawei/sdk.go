@@ -27,12 +27,20 @@ import (
 
 // ECSAPI abstracts the subset of Huawei Cloud ECS-related APIs used by this project.
 type ECSAPI interface {
-	CreateAutoLaunchGroup(request *cms.CreateAutoLaunchGroupRequest) (*cms.CreateAutoLaunchGroupResponse, error)
 	CreateServers(request *ecs.CreateServersRequest) (*ecs.CreateServersResponse, error)
 	DeleteServers(request *ecs.DeleteServersRequest) (*ecs.DeleteServersResponse, error)
 	ListServersDetails(request *ecs.ListServersDetailsRequest) (*ecs.ListServersDetailsResponse, error)
 	BatchCreateServerTags(request *ecs.BatchCreateServerTagsRequest) (*ecs.BatchCreateServerTagsResponse, error)
 	ListFlavors(request *ecs.ListFlavorsRequest) (*ecs.ListFlavorsResponse, error)
+}
+
+// CMSAPI abstracts the subset of Huawei Cloud CMS-related APIs used by this project.
+type CMSAPI interface {
+	CreateAutoLaunchGroup(request *cms.CreateAutoLaunchGroupRequest) (*cms.CreateAutoLaunchGroupResponse, error)
+}
+
+// IMSAPI abstracts the subset of Huawei Cloud IMS-related APIs used by this project.
+type IMSAPI interface {
 	ListImages(request *ims.ListImagesRequest) (*ims.ListImagesResponse, error)
 }
 
