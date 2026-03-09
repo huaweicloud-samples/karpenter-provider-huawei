@@ -24,6 +24,7 @@ import (
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/basic"
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/config"
+	ecsRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/region"
 	vpcRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/region"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
@@ -65,9 +66,13 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	logger := log.FromContext(ctx)
 
 	reg := os.Getenv("HUAWEICLOUD_REGION")
-	region, err := vpcRegion.SafeValueOf(reg)
+	vpcReg, err := vpcRegion.SafeValueOf(reg)
 	if err != nil {
-		lo.Must0(fmt.Errorf("unable to get region: %w", err))
+		lo.Must0(fmt.Errorf("unable to get VPC region: %w", err))
+	}
+	ecsReg, err := ecsRegion.SafeValueOf(reg)
+	if err != nil {
+		lo.Must0(fmt.Errorf("unable to get ECS region: %w", err))
 	}
 	ak := os.Getenv("HUAWEICLOUD_AK")
 	if ak == "" {
@@ -88,13 +93,13 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		lo.Must0(fmt.Errorf("unable to get credentials"))
 	}
 
-	vpcApi := sdk.NewVPCService(region, credentials, config.DefaultHttpConfig())
+	vpcApi := sdk.NewVPCService(vpcReg, credentials, config.DefaultHttpConfig())
 	subnetProvider := subnet.NewDefaultProvider(vpcApi, cache.New(DefaultTTL, DefaultCleanupInterval), cache.New(AvailableIPAddressTTL, DefaultCleanupInterval))
 
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)
 	lo.Must0(versionProvider.UpdateVersionWithValidation(ctx))
 
-	ecsApi := sdk.NewECSService(region, credentials, config.DefaultHttpConfig())
+	ecsApi := sdk.NewECSService(ecsReg, credentials, config.DefaultHttpConfig())
 	instanceTypeProvider := instancetype.NewDefaultProvider(ecsApi, cache.New(InstanceTypesZonesAndOfferingsTTL, DefaultCleanupInterval), cache.New(DiscoveredCapacityCacheTTL, DefaultCleanupInterval))
 
 	if err := instanceTypeProvider.UpdateInstanceTypes(ctx); err != nil {
