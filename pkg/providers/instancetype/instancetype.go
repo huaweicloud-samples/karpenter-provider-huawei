@@ -54,12 +54,12 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
+	ecsapi                sdk.ECSAPI
+	instanceTypesResolver Resolver
+
 	muFetch       sync.Mutex
 	fetchDone     bool
 	instanceTypes []ecsMdl.Flavor
-
-	ecsapi                sdk.ECSAPI
-	instanceTypesResolver Resolver
 
 	muInstanceTypes   sync.RWMutex
 	instanceTypesInfo map[InstanceType]ecsMdl.Flavor
@@ -73,14 +73,14 @@ type DefaultProvider struct {
 }
 
 func NewDefaultProvider(
+	ecsapi sdk.ECSAPI,
 	instanceTypesCache *cache.Cache,
 	discoveredCapacityCache *cache.Cache,
-	ecsapi sdk.ECSAPI,
 ) *DefaultProvider {
 	return &DefaultProvider{
+		ecsapi:                  ecsapi,
 		instanceTypesCache:      instanceTypesCache,
 		discoveredCapacityCache: discoveredCapacityCache,
-		ecsapi:                  ecsapi,
 		cm:                      pretty.NewChangeMonitor(),
 	}
 }
