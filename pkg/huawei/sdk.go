@@ -20,7 +20,6 @@ import (
 	bss "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/bss/v2/model"
 	cce "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cce/v3/model"
 	cms "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cms/v1/model"
-	cse "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cse/v1/model"
 	ecs "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/model"
 	ims "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ims/v2/model"
 	vpc "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/model"
@@ -33,7 +32,7 @@ type ECSAPI interface {
 	DeleteServers(request *ecs.DeleteServersRequest) (*ecs.DeleteServersResponse, error)
 	ListServersDetails(request *ecs.ListServersDetailsRequest) (*ecs.ListServersDetailsResponse, error)
 	BatchCreateServerTags(request *ecs.BatchCreateServerTagsRequest) (*ecs.BatchCreateServerTagsResponse, error)
-	ListFlavors(request *cse.ListFlavorsRequest) (*cse.ListFlavorsResponse, error)
+	ListFlavors(request *ecs.ListFlavorsRequest) (*ecs.ListFlavorsResponse, error)
 	ListImages(request *ims.ListImagesRequest) (*ims.ListImagesResponse, error)
 }
 
