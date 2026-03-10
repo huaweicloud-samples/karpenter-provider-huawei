@@ -100,7 +100,12 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	lo.Must0(versionProvider.UpdateVersionWithValidation(ctx))
 
 	ecsApi := sdk.NewECSService(ecsReg, credentials, config.DefaultHttpConfig())
-	instanceTypeProvider := instancetype.NewDefaultProvider(ecsApi, cache.New(InstanceTypesZonesAndOfferingsTTL, DefaultCleanupInterval), cache.New(DiscoveredCapacityCacheTTL, DefaultCleanupInterval))
+	instanceTypeProvider := instancetype.NewDefaultProvider(
+		ecsApi,
+		cache.New(InstanceTypesZonesAndOfferingsTTL, DefaultCleanupInterval),
+		cache.New(DiscoveredCapacityCacheTTL, DefaultCleanupInterval),
+		instancetype.NewDefaultResolver(reg),
+	)
 
 	if err := instanceTypeProvider.UpdateInstanceTypes(ctx); err != nil {
 		logger.Error(err, "failed to preload instance types")
