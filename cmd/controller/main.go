@@ -42,6 +42,7 @@ func main() {
 			huaweicloudProvider,
 			op.VersionProvider,
 			op.SubnetProvider,
+			op.InstanceTypeProvider,
 		)...).
 		Start(ctx)
 }

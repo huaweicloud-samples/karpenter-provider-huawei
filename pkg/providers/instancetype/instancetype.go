@@ -54,12 +54,12 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
+	ecsapi                sdk.ECSAPI
+	instanceTypesResolver Resolver
+
 	muFetch       sync.Mutex
 	fetchDone     bool
 	instanceTypes []ecsMdl.Flavor
-
-	ecsapi                sdk.ECSAPI
-	instanceTypesResolver Resolver
 
 	muInstanceTypes   sync.RWMutex
 	instanceTypesInfo map[InstanceType]ecsMdl.Flavor
@@ -73,14 +73,18 @@ type DefaultProvider struct {
 }
 
 func NewDefaultProvider(
+	ecsapi sdk.ECSAPI,
 	instanceTypesCache *cache.Cache,
 	discoveredCapacityCache *cache.Cache,
-	ecsapi sdk.ECSAPI,
+	instanceTypesResolver Resolver,
 ) *DefaultProvider {
 	return &DefaultProvider{
+		ecsapi:                  ecsapi,
+		instanceTypesInfo:       map[InstanceType]ecsMdl.Flavor{},
+		instanceTypesOfferings:  map[InstanceType]sets.Set[string]{},
+		instanceTypesResolver:   instanceTypesResolver,
 		instanceTypesCache:      instanceTypesCache,
 		discoveredCapacityCache: discoveredCapacityCache,
-		ecsapi:                  ecsapi,
 		cm:                      pretty.NewChangeMonitor(),
 	}
 }
@@ -161,13 +165,20 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass NodeClass) ([]*clo
 func (p *DefaultProvider) cacheKey(nodeClass NodeClass) string {
 	// Compute fully initialized instance types hash key
 	subnetZonesHash, _ := hashstructure.Hash(nodeClass.Zones(), hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
-	return fmt.Sprintf("%016x", subnetZonesHash)
+	itsHash := ""
+	if p.instanceTypesResolver != nil {
+		itsHash = p.instanceTypesResolver.CacheKey(nodeClass)
+	}
+	return fmt.Sprintf("%016x-%s", subnetZonesHash, itsHash)
 }
 
 func (p *DefaultProvider) get(ctx context.Context, nodeClass NodeClass, name InstanceType) (*cloudprovider.InstanceType, error) {
 	info, ok := p.instanceTypesInfo[name]
 	if !ok {
 		return nil, fmt.Errorf("instance type %s not found in cache", name)
+	}
+	if p.instanceTypesResolver == nil {
+		return nil, fmt.Errorf("instance types resolver is nil")
 	}
 	it := p.instanceTypesResolver.Resolve(ctx, info, p.instanceTypesOfferings[InstanceType(info.Name)].UnsortedList(), nodeClass)
 	if it == nil {

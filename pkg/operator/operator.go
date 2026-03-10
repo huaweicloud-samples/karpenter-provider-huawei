@@ -24,10 +24,14 @@ import (
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/basic"
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/config"
+	ecsRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/region"
 	vpcRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/region"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/karpenter/pkg/operator"
+
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/instancetype"
 
 	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/subnet"
@@ -44,20 +48,31 @@ const (
 	DefaultCleanupInterval = time.Minute
 	// AvailableIPAddressTTL is time to drop AvailableIPAddress data if it is not updated within the TTL
 	AvailableIPAddressTTL = 5 * time.Minute
+	// InstanceTypesZonesAndOfferingsTTL is the time before we refresh instance types, zones, and offerings at EC2
+	InstanceTypesZonesAndOfferingsTTL = 5 * time.Minute
+	// if it is not updated by a node creation event or refreshed during controller reconciliation
+	DiscoveredCapacityCacheTTL = 60 * 24 * time.Hour
 )
 
 // Operator is injected into the HuaweiCloud CloudProvider's factories
 type Operator struct {
 	*operator.Operator
-	VersionProvider *version.DefaultProvider
-	SubnetProvider  subnet.Provider
+	VersionProvider      *version.DefaultProvider
+	SubnetProvider       subnet.Provider
+	InstanceTypeProvider *instancetype.DefaultProvider
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
+	logger := log.FromContext(ctx)
+
 	reg := os.Getenv("HUAWEICLOUD_REGION")
-	region, err := vpcRegion.SafeValueOf(reg)
+	vpcReg, err := vpcRegion.SafeValueOf(reg)
 	if err != nil {
-		lo.Must0(fmt.Errorf("unable to get region: %w", err))
+		lo.Must0(fmt.Errorf("unable to get VPC region: %w", err))
+	}
+	ecsReg, err := ecsRegion.SafeValueOf(reg)
+	if err != nil {
+		lo.Must0(fmt.Errorf("unable to get ECS region: %w", err))
 	}
 	ak := os.Getenv("HUAWEICLOUD_AK")
 	if ak == "" {
@@ -78,14 +93,30 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		lo.Must0(fmt.Errorf("unable to get credentials"))
 	}
 
-	vpcApi := sdk.NewVPCService(region, credentials, config.DefaultHttpConfig())
+	vpcApi := sdk.NewVPCService(vpcReg, credentials, config.DefaultHttpConfig())
 	subnetProvider := subnet.NewDefaultProvider(vpcApi, cache.New(DefaultTTL, DefaultCleanupInterval), cache.New(AvailableIPAddressTTL, DefaultCleanupInterval))
 
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)
 	lo.Must0(versionProvider.UpdateVersionWithValidation(ctx))
+
+	ecsApi := sdk.NewECSService(ecsReg, credentials, config.DefaultHttpConfig())
+	instanceTypeProvider := instancetype.NewDefaultProvider(
+		ecsApi,
+		cache.New(InstanceTypesZonesAndOfferingsTTL, DefaultCleanupInterval),
+		cache.New(DiscoveredCapacityCacheTTL, DefaultCleanupInterval),
+		instancetype.NewDefaultResolver(reg),
+	)
+
+	if err := instanceTypeProvider.UpdateInstanceTypes(ctx); err != nil {
+		logger.Error(err, "failed to preload instance types")
+	}
+	if err := instanceTypeProvider.UpdateInstanceTypeOfferings(ctx); err != nil {
+		logger.Error(err, "failed to preload instance type offerings")
+	}
 	return ctx, &Operator{
-		Operator:        operator,
-		VersionProvider: versionProvider,
-		SubnetProvider:  subnetProvider,
+		Operator:             operator,
+		VersionProvider:      versionProvider,
+		SubnetProvider:       subnetProvider,
+		InstanceTypeProvider: instanceTypeProvider,
 	}
 }
