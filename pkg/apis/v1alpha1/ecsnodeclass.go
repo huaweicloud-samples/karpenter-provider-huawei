@@ -48,6 +48,7 @@ type ECSNodeClassSpec struct {
 }
 
 // +kubebuilder:object:root=true
+// +kubebuilder:resource:scope=Cluster
 // +kubebuilder:subresource:status
 
 // ECSNodeClass is the Schema for the ecsnodeclasses API
