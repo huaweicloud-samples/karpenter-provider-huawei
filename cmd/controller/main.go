@@ -17,10 +17,14 @@ limitations under the License.
 package main
 
 import (
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/metrics"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider/overlay"
+	"sigs.k8s.io/karpenter/pkg/controllers/state"
 	coreoperator "sigs.k8s.io/karpenter/pkg/operator"
 
-	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/cloudprovider"
+	corecontrollers "sigs.k8s.io/karpenter/pkg/controllers"
 
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/cloudprovider"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/controllers"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/operator"
 )
@@ -33,7 +37,22 @@ func main() {
 		op.EventRecorder,
 	)
 
+	overlayUndecoratedCloudProvider := metrics.Decorate(huaweicloudProvider)
+	cloudProvider := overlay.Decorate(overlayUndecoratedCloudProvider, op.GetClient(), op.InstanceTypeStore)
+	clusterState := state.NewCluster(op.Clock, op.GetClient(), cloudProvider)
+
 	op.
+		WithControllers(ctx, corecontrollers.NewControllers(
+			ctx,
+			op.Manager,
+			op.Clock,
+			op.GetClient(),
+			op.EventRecorder,
+			cloudProvider,
+			overlayUndecoratedCloudProvider,
+			clusterState,
+			op.InstanceTypeStore,
+		)...).
 		WithControllers(ctx, controllers.NewControllers(
 			ctx,
 			op.Manager,
