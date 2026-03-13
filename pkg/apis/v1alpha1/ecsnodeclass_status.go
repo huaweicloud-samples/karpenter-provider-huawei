@@ -47,7 +47,6 @@ func (in *ECSNodeClass) SetConditions(conditions []status.Condition) {
 
 func (in *ECSNodeClass) StatusConditions() status.ConditionSet {
 	conds := []string{
-		ConditionTypeValidationSucceeded,
 		ConditionTypeSubnetsReady,
 	}
 	return status.NewReadyConditions(conds...).For(in)
