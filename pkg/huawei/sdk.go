@@ -19,7 +19,6 @@ package huawei
 import (
 	bss "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/bss/v2/model"
 	cce "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cce/v3/model"
-	cms "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cms/v1/model"
 	ecs "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/model"
 	ims "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ims/v2/model"
 	vpc "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/model"
@@ -27,16 +26,9 @@ import (
 
 // ECSAPI abstracts the subset of Huawei Cloud ECS-related APIs used by this project.
 type ECSAPI interface {
-	CreateServers(request *ecs.CreateServersRequest) (*ecs.CreateServersResponse, error)
-	DeleteServers(request *ecs.DeleteServersRequest) (*ecs.DeleteServersResponse, error)
 	ListServersDetails(request *ecs.ListServersDetailsRequest) (*ecs.ListServersDetailsResponse, error)
 	BatchCreateServerTags(request *ecs.BatchCreateServerTagsRequest) (*ecs.BatchCreateServerTagsResponse, error)
 	ListFlavors(request *ecs.ListFlavorsRequest) (*ecs.ListFlavorsResponse, error)
-}
-
-// CMSAPI abstracts the subset of Huawei Cloud CMS-related APIs used by this project.
-type CMSAPI interface {
-	CreateAutoLaunchGroup(request *cms.CreateAutoLaunchGroupRequest) (*cms.CreateAutoLaunchGroupResponse, error)
 }
 
 // IMSAPI abstracts the subset of Huawei Cloud IMS-related APIs used by this project.
@@ -53,6 +45,10 @@ type VPCAPI interface {
 // CCEAPI abstracts the subset of Huawei Cloud CCE APIs used by this project.
 type CCEAPI interface {
 	ShowCluster(request *cce.ShowClusterRequest) (*cce.ShowClusterResponse, error)
+	CreateNode(request *cce.CreateNodeRequest) (*cce.CreateNodeResponse, error)
+	DeleteNode(request *cce.DeleteNodeRequest) (*cce.DeleteNodeResponse, error)
+	ListNodes(request *cce.ListNodesRequest) (*cce.ListNodesResponse, error)
+	ShowNode(request *cce.ShowNodeRequest) (*cce.ShowNodeResponse, error)
 }
 
 // PricingAPI abstracts the subset of Huawei Cloud BSS pricing APIs used by this project.
