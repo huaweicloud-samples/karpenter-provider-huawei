@@ -49,6 +49,7 @@ type CCEAPI interface {
 	DeleteNode(request *cce.DeleteNodeRequest) (*cce.DeleteNodeResponse, error)
 	ListNodes(request *cce.ListNodesRequest) (*cce.ListNodesResponse, error)
 	ShowNode(request *cce.ShowNodeRequest) (*cce.ShowNodeResponse, error)
+	ShowJob(request *cce.ShowJobRequest) (*cce.ShowJobResponse, error)
 }
 
 // PricingAPI abstracts the subset of Huawei Cloud BSS pricing APIs used by this project.
