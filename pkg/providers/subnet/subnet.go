@@ -97,6 +97,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ECSNodeC
 	subnets := map[string]vpcMdl.Subnet{}
 	response, err := p.vpcapi.ListSubnets(&vpcMdl.ListSubnetsRequest{
 		Limit: lo.ToPtr(int32(500)),
+		VpcId: lo.ToPtr(nodeClass.Spec.VpcID),
 	})
 	if err != nil {
 		return nil, serrors.Wrap(
