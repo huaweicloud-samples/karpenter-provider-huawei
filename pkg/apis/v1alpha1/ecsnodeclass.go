@@ -17,6 +17,9 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
+	"strings"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -45,6 +48,87 @@ type ECSNodeClassSpec struct {
 	// +kubebuilder:validation:XValidation:message="evictionSoftGracePeriod OwnerKey does not have a matching evictionSoft",rule="has(self.evictionSoftGracePeriod) ? self.evictionSoftGracePeriod.all(e, (e in self.evictionSoft)):true"
 	// +optional
 	Kubelet *KubeletConfiguration `json:"kubelet,omitempty"`
+
+	// HMISelectorTerms is a list of selector terms used by Karpenter to pick the node OS or private image
+	// when calling CCE CreateNode. The terms are ORed.
+	//
+	// - alias maps to CreateNode spec.os (NodeSpec.Os)
+	// - id maps to CreateNode spec.extendParam.alpha.cce/NodeImageID (NodeExtendParam.AlphaCceNodeImageID)
+	// +kubebuilder:validation:XValidation:message="hmiSelectorTerms cannot be empty",rule="self.size() != 0"
+	// +kubebuilder:validation:XValidation:message="expected at least one, got none, ['alias', 'id']",rule="self.all(x, has(x.alias) || has(x.id))"
+	// +kubebuilder:validation:XValidation:message="'alias' and 'id' are mutually exclusive within a single hmiSelectorTerm",rule="!self.exists(x, has(x.alias) && has(x.id))"
+	// +kubebuilder:validation:MinItems:=1
+	// +kubebuilder:validation:MaxItems:=30
+	// +required
+	HMISelectorTerms []HMISelectorTerm `json:"hmiSelectorTerms" hash:"ignore"`
+
+	// VpcID is the VPC ID used to scope subnet discovery.
+	// +kubebuilder:validation:Pattern="^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+	// +required
+	VpcID string `json:"vpcId" hash:"ignore"`
+
+	// RootVolume is the system disk configuration used for CCE CreateNode.
+	// +required
+	RootVolume RootVolume `json:"rootVolume" hash:"ignore"`
+}
+
+// RootVolume defines the system disk configuration for nodes created via CCE.
+type RootVolume struct {
+	// Size is the system disk size in GB.
+	// +kubebuilder:validation:Minimum:=40
+	// +kubebuilder:validation:Maximum:=1024
+	// +kubebuilder:default:=40
+	// +optional
+	Size *int32 `json:"size,omitempty"`
+
+	// VolumeType is the system disk type.
+	// Common values: SSD, SAS, SATA, ESSD, GPSSD, ESSD2, GPSSD2.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:default:=SSD
+	// +optional
+	VolumeType *string `json:"volumeType,omitempty"`
+}
+
+// HMISelectorTerm defines selection logic for a hmi used by Karpenter to launch nodes.
+// If multiple fields are used for selection, the requirements are ANDed.
+type HMISelectorTerm struct {
+	// Alias is the node operating system type used by CCE CreateNode.
+	// It maps to CreateNode spec.os (NodeSpec.Os).
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=128
+	// +optional
+	Alias string `json:"alias,omitempty"`
+
+	// ID is the private image ID used by CCE CreateNode.
+	// It maps to CreateNode spec.extendParam.alpha.cce/NodeImageID (NodeExtendParam.AlphaCceNodeImageID).
+	// +kubebuilder:validation:Pattern="^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+	// +optional
+	ID string `json:"id,omitempty"`
+}
+
+// ResolveHMIForCreateNode resolves the node OS / image selection for CCE CreateNode.
+//
+// MVP behavior: the first term is selected.
+// - alias maps to CreateNode spec.os (NodeSpec.Os)
+// - id maps to CreateNode spec.extendParam.alpha.cce/NodeImageID (NodeExtendParam.AlphaCceNodeImageID)
+func (s *ECSNodeClassSpec) ResolveHMIForCreateNode() (osAlias string, nodeImageID string, err error) {
+	if s == nil {
+		return "", "", fmt.Errorf("nodeClass.spec is nil")
+	}
+	if len(s.HMISelectorTerms) == 0 {
+		return "", "", fmt.Errorf("nodeClass.spec.hmiSelectorTerms is required")
+	}
+	term := s.HMISelectorTerms[0]
+	osAlias = strings.TrimSpace(term.Alias)
+	nodeImageID = strings.TrimSpace(term.ID)
+
+	if osAlias == "" && nodeImageID == "" {
+		return "", "", fmt.Errorf("nodeClass.spec.hmiSelectorTerms[0] must set one of alias or id")
+	}
+	if osAlias != "" && nodeImageID != "" {
+		return "", "", fmt.Errorf("nodeClass.spec.hmiSelectorTerms[0] cannot set both alias and id")
+	}
+	return osAlias, nodeImageID, nil
 }
 
 // +kubebuilder:object:root=true
@@ -87,6 +171,24 @@ type SubnetSelectorTerm struct {
 	// Name is the subnet id in ECS
 	// +kubebuilder:validation:MinLength=1
 	// +optional
+	Name string `json:"name,omitempty"`
+}
+
+// SecurityGroupSelectorTerm defines selection logic for a security group used by Karpenter to launch nodes.
+// If multiple fields are used for selection, the requirements are ANDed.
+type SecurityGroupSelectorTerm struct {
+	// Tags is a map of key/value tags used to select security groups.
+	// Specifying '*' for a value selects all values for a given tag key.
+	// +kubebuilder:validation:XValidation:message="empty tag keys or values aren't supported",rule="self.all(k, k != '' && self[k] != '')"
+	// +kubebuilder:validation:MaxProperties:=20
+	// +optional
+	Tags map[string]string `json:"tags,omitempty"`
+	// ID is the security group id in ECS
+	// +kubebuilder:validation:Pattern:="sg-[0-9a-z]+"
+	// +optional
+	ID string `json:"id,omitempty"`
+	// Name is the security group name in ECS.
+	// This value is the name field, which is different from the name tag.
 	Name string `json:"name,omitempty"`
 }
 

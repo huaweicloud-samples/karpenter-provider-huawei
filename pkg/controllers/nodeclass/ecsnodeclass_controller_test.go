@@ -37,8 +37,7 @@ var _ = ginkgo.Describe("ECSNodeClass Controller", func() {
 		ctx := context.Background()
 
 		typeNamespacedName := types.NamespacedName{
-			Name:      resourceName,
-			Namespace: "default", // TODO(user):Modify as needed
+			Name: resourceName,
 		}
 		ecsnodeclass := &karpenterv1alpha1.ECSNodeClass{}
 
@@ -48,10 +47,13 @@ var _ = ginkgo.Describe("ECSNodeClass Controller", func() {
 			if err != nil && errors.IsNotFound(err) {
 				resource := &karpenterv1alpha1.ECSNodeClass{
 					ObjectMeta: metav1.ObjectMeta{
-						Name:      resourceName,
-						Namespace: "default",
+						Name: resourceName,
 					},
 					Spec: karpenterv1alpha1.ECSNodeClassSpec{
+						VpcID: "323e4567-e89b-12d3-a456-426614174000",
+						HMISelectorTerms: []karpenterv1alpha1.HMISelectorTerm{
+							{Alias: "Huawei Cloud EulerOS 2.0"},
+						},
 						SubnetSelectorTerms: []karpenterv1alpha1.SubnetSelectorTerm{
 							{ID: "123e4567-e89b-12d3-a456-426614174000"},
 						},
