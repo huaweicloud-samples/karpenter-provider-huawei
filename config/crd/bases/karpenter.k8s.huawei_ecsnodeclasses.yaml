@@ -39,6 +39,43 @@ spec:
           spec:
             description: spec defines the desired state of ECSNodeClass
             properties:
+              hmiSelectorTerms:
+                description: |-
+                  HMISelectorTerms is a list of selector terms used by Karpenter to pick the node OS or private image
+                  when calling CCE CreateNode. The terms are ORed.
+
+                  - alias maps to CreateNode spec.os (NodeSpec.Os)
+                  - id maps to CreateNode spec.extendParam.alpha.cce/NodeImageID (NodeExtendParam.AlphaCceNodeImageID)
+                items:
+                  description: |-
+                    HMISelectorTerm defines selection logic for a hmi used by Karpenter to launch nodes.
+                    If multiple fields are used for selection, the requirements are ANDed.
+                  properties:
+                    alias:
+                      description: |-
+                        Alias is the node operating system type used by CCE CreateNode.
+                        It maps to CreateNode spec.os (NodeSpec.Os).
+                      maxLength: 128
+                      minLength: 1
+                      type: string
+                    id:
+                      description: |-
+                        ID is the private image ID used by CCE CreateNode.
+                        It maps to CreateNode spec.extendParam.alpha.cce/NodeImageID (NodeExtendParam.AlphaCceNodeImageID).
+                      pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+                      type: string
+                  type: object
+                maxItems: 30
+                minItems: 1
+                type: array
+                x-kubernetes-validations:
+                - message: hmiSelectorTerms cannot be empty
+                  rule: self.size() != 0
+                - message: expected at least one, got none, ['alias', 'id']
+                  rule: self.all(x, has(x.alias) || has(x.id))
+                - message: '''alias'' and ''id'' are mutually exclusive within a single
+                    hmiSelectorTerm'
+                  rule: '!self.exists(x, has(x.alias) && has(x.id))'
               kubelet:
                 description: |-
                   Kubelet defines args to be used when configuring kubelet on provisioned nodes.
@@ -162,6 +199,25 @@ spec:
                     evictionSoft
                   rule: has(self.evictionSoftGracePeriod) ? self.evictionSoftGracePeriod.all(e,
                     (e in self.evictionSoft)):true
+              rootVolume:
+                description: RootVolume is the system disk configuration used for
+                  CCE CreateNode.
+                properties:
+                  size:
+                    default: 40
+                    description: Size is the system disk size in GB.
+                    format: int32
+                    maximum: 1024
+                    minimum: 40
+                    type: integer
+                  volumeType:
+                    default: SSD
+                    description: |-
+                      VolumeType is the system disk type.
+                      Common values: SSD, SAS, SATA, ESSD, GPSSD, ESSD2, GPSSD2.
+                    minLength: 1
+                    type: string
+                type: object
               subnetSelectorTerms:
                 description: SubnetSelectorTerms is a list of subnet selector terms.
                   The terms are ORed.
@@ -186,8 +242,15 @@ spec:
                   rule: self.size() != 0
                 - message: expected at least one, got none, ['name', 'id']
                   rule: self.all(x, has(x.name) || has(x.id))
+              vpcId:
+                description: VpcID is the VPC ID used to scope subnet discovery.
+                pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
+                type: string
             required:
+            - hmiSelectorTerms
+            - rootVolume
             - subnetSelectorTerms
+            - vpcId
             type: object
           status:
             description: status defines the observed state of ECSNodeClass
