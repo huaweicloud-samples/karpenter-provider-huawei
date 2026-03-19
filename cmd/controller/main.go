@@ -36,6 +36,7 @@ func main() {
 		op.GetClient(),
 		op.EventRecorder,
 		op.InstanceTypeProvider,
+		op.InstanceProvider,
 	)
 
 	overlayUndecoratedCloudProvider := metrics.Decorate(huaweicloudProvider)

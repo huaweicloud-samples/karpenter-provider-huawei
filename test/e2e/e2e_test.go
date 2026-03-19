@@ -73,6 +73,7 @@ var _ = Describe("Manager", Ordered, func() {
 			"--from-literal=HUAWEICLOUD_REGION=cn-north-4",
 			"--from-literal=HUAWEICLOUD_AK=fake-ak",
 			"--from-literal=HUAWEICLOUD_SK=fake-sk",
+			"--from-literal=HUAWEICLOUD_CCE_CLUSTER_ID=fake-cluster-id",
 			"-n", namespace,
 		)
 		_, err = utils.Run(cmd)

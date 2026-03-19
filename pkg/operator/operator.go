@@ -24,6 +24,7 @@ import (
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/basic"
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/config"
+	cceRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cce/v3/region"
 	ecsRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/region"
 	vpcRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/region"
 	"github.com/patrickmn/go-cache"
@@ -31,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/karpenter/pkg/operator"
 
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/instance"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/instancetype"
 
 	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
@@ -60,6 +62,7 @@ type Operator struct {
 	VersionProvider      *version.DefaultProvider
 	SubnetProvider       subnet.Provider
 	InstanceTypeProvider *instancetype.DefaultProvider
+	InstanceProvider     instance.Provider
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -73,6 +76,10 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	ecsReg, err := ecsRegion.SafeValueOf(reg)
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get ECS region: %w", err))
+	}
+	cceReg, err := cceRegion.SafeValueOf(reg)
+	if err != nil {
+		lo.Must0(fmt.Errorf("unable to get CCE region: %w", err))
 	}
 	ak := os.Getenv("HUAWEICLOUD_AK")
 	if ak == "" {
@@ -93,6 +100,11 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		lo.Must0(fmt.Errorf("unable to get credentials"))
 	}
 
+	clusterID := os.Getenv("HUAWEICLOUD_CCE_CLUSTER_ID")
+	if clusterID == "" {
+		lo.Must0(fmt.Errorf("unable to get CCE cluster id"))
+	}
+
 	vpcApi := sdk.NewVPCService(vpcReg, credentials, config.DefaultHttpConfig())
 	subnetProvider := subnet.NewDefaultProvider(vpcApi, cache.New(DefaultTTL, DefaultCleanupInterval), cache.New(AvailableIPAddressTTL, DefaultCleanupInterval))
 
@@ -100,6 +112,8 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	lo.Must0(versionProvider.UpdateVersionWithValidation(ctx))
 
 	ecsApi := sdk.NewECSService(ecsReg, credentials, config.DefaultHttpConfig())
+	cceApi := sdk.NewCCEService(cceReg, credentials, config.DefaultHttpConfig())
+	instanceProvider := instance.NewDefaultProvider(clusterID, cceApi, ecsApi, subnetProvider)
 	instanceTypeProvider := instancetype.NewDefaultProvider(
 		ecsApi,
 		cache.New(InstanceTypesZonesAndOfferingsTTL, DefaultCleanupInterval),
@@ -118,5 +132,6 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		VersionProvider:      versionProvider,
 		SubnetProvider:       subnetProvider,
 		InstanceTypeProvider: instanceTypeProvider,
+		InstanceProvider:     instanceProvider,
 	}
 }
