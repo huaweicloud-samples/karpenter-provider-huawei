@@ -31,6 +31,7 @@ import (
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/events"
+	"sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
@@ -39,6 +40,12 @@ import (
 )
 
 var _ cloudprovider.CloudProvider = (*CloudProvider)(nil)
+
+var resolvedNodeClaimLabelKeys = []string{
+	corev1.LabelArchStable,
+	corev1.LabelOSStable,
+	corev1.LabelTopologyRegion,
+}
 
 // CloudProvider implements Karpenter's CloudProvider interface for Huawei Cloud.
 type CloudProvider struct {
@@ -115,11 +122,7 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 
 	nc := &karpv1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
-			Labels: map[string]string{
-				corev1.LabelInstanceTypeStable: createdInstance.Flavor,
-				corev1.LabelTopologyZone:       createdInstance.Zone,
-				karpv1.CapacityTypeLabelKey:    karpv1.CapacityTypeOnDemand,
-			},
+			Labels: resolvedNodeClaimLabels(instanceType, createdInstance),
 			Annotations: map[string]string{
 				"karpenter.k8s.huawei/cce-node-id":   createdInstance.NodeID,
 				"karpenter.k8s.huawei/ecs-server-id": createdInstance.ServerID,
@@ -139,6 +142,28 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		nc.Annotations["karpenter.k8s.huawei/cce-job-id"] = createdInstance.JobID
 	}
 	return nc, nil
+}
+
+func resolvedNodeClaimLabels(instanceType *cloudprovider.InstanceType, createdInstance *instance.Instance) map[string]string {
+	labels := map[string]string{
+		corev1.LabelInstanceTypeStable: createdInstance.Flavor,
+		corev1.LabelTopologyZone:       createdInstance.Zone,
+		karpv1.CapacityTypeLabelKey:    karpv1.CapacityTypeOnDemand,
+	}
+	for _, key := range resolvedNodeClaimLabelKeys {
+		if value, ok := singleValueRequirement(instanceType.Requirements, key); ok {
+			labels[key] = value
+		}
+	}
+	return labels
+}
+
+func singleValueRequirement(requirements scheduling.Requirements, key string) (string, bool) {
+	requirement, ok := requirements[key]
+	if !ok || requirement.Operator() != corev1.NodeSelectorOpIn || requirement.Len() != 1 {
+		return "", false
+	}
+	return requirement.Values()[0], true
 }
 
 // Delete is called by Karpenter to deprovision capacity for a NodeClaim.

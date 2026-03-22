@@ -85,6 +85,11 @@ func TestComputeRequirements_UsesSubnetZonesWhenOfferingZonesEmpty(t *testing.T)
 	if gotRegions.Len() != 1 || !gotRegions.Has("cn-south-1") {
 		t.Fatalf("expected region {cn-south-1}, got %v", gotRegions.UnsortedList())
 	}
+
+	gotOS := sets.New(reqs.Get(corev1.LabelOSStable).Values()...)
+	if gotOS.Len() != 1 || !gotOS.Has(string(corev1.Linux)) {
+		t.Fatalf("expected os {linux}, got %v", gotOS.UnsortedList())
+	}
 }
 
 func stringPtr(v string) *string {

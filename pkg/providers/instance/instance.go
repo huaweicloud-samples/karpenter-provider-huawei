@@ -133,15 +133,14 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.ECSNod
 		if resp == nil || resp.Metadata == nil || resp.Metadata.Uid == nil {
 			return nil, fmt.Errorf("CreateNode succeeded but response metadata.uid is empty")
 		}
-		if resp.Status == nil || resp.Status.ServerId == nil || *resp.Status.ServerId == "" {
-			return nil, fmt.Errorf("CreateNode succeeded but response status.serverId is empty")
-		}
 		instance := &Instance{
-			NodeID:   lo.FromPtr(resp.Metadata.Uid),
-			ServerID: lo.FromPtr(resp.Status.ServerId),
-			Flavor:   c.instanceType.Name,
-			Zone:     c.zone,
-			JobID:    lo.FromPtrOr(resp.Status.JobID, ""),
+			NodeID: lo.FromPtr(resp.Metadata.Uid),
+			Flavor: c.instanceType.Name,
+			Zone:   c.zone,
+		}
+		if resp.Status != nil {
+			instance.ServerID = lo.FromPtrOr(resp.Status.ServerId, "")
+			instance.JobID = lo.FromPtrOr(resp.Status.JobID, "")
 		}
 		return instance, nil
 	}
@@ -189,6 +188,7 @@ func buildCreateCandidates(instanceTypes []*cloudprovider.InstanceType, reqs sch
 
 func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.ECSNodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, c createCandidate, osAlias, nodeImageID string) *cceMdl.NodeSpec {
 	rootVolumeSize, rootVolumeType := resolveRootVolume(nodeClass)
+	dataVolumes := defaultDataVolumes(rootVolumeType)
 
 	k8sTags := map[string]string{}
 	for k, v := range tags {
@@ -210,6 +210,8 @@ func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.ECSNodeClass,
 			Size:       rootVolumeSize,
 			Volumetype: rootVolumeType,
 		},
+		// CCE requires a data disk for standard ECS-backed worker nodes.
+		DataVolumes: dataVolumes,
 		OffloadNode: lo.ToPtr(true),
 		NodeNicSpec: &cceMdl.NodeNicSpec{
 			PrimaryNic: &cceMdl.NicSpec{SubnetId: &subnetID},
@@ -237,11 +239,24 @@ func resolveRootVolume(nodeClass *v1alpha1.ECSNodeClass) (int32, string) {
 	return size, volumeType
 }
 
+func defaultDataVolumes(volumeType string) *[]cceMdl.Volume {
+	volumes := []cceMdl.Volume{{
+		Size:       100,
+		Volumetype: volumeType,
+	}}
+	return lo.ToPtr(volumes)
+}
+
 func toCCETaints(nodeClaim *karpv1.NodeClaim) *[]cceMdl.Taint {
 	var taints []corev1.Taint
-	taints = append(taints, karpv1.UnregisteredNoExecuteTaint)
 	taints = append(taints, nodeClaim.Spec.StartupTaints...)
 	taints = append(taints, nodeClaim.Spec.Taints...)
+	// CCE NodeSpec taints are persistent cluster taints, not one-time kubelet register taints.
+	// Passing karpenter.sh/unregistered here causes CCE to continuously reconcile it back onto
+	// the Node after Karpenter removes it during registration.
+	taints = lo.Reject(taints, func(t corev1.Taint, _ int) bool {
+		return t.MatchTaint(&karpv1.UnregisteredNoExecuteTaint)
+	})
 
 	// Deduplicate by (key,effect)
 	deduped := map[string]corev1.Taint{}
