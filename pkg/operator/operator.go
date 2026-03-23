@@ -23,7 +23,9 @@ import (
 	"time"
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/basic"
+	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/global"
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/config"
+	coreRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/core/region"
 	cceRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cce/v3/region"
 	ecsRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/region"
 	vpcRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/region"
@@ -34,6 +36,7 @@ import (
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/instance"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/instancetype"
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/pricing"
 
 	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/subnet"
@@ -54,6 +57,7 @@ const (
 	InstanceTypesZonesAndOfferingsTTL = 5 * time.Minute
 	// if it is not updated by a node creation event or refreshed during controller reconciliation
 	DiscoveredCapacityCacheTTL = 60 * 24 * time.Hour
+	BillingEndpoint            = "https://bss.myhuaweicloud.com"
 )
 
 // Operator is injected into the HuaweiCloud CloudProvider's factories
@@ -63,6 +67,7 @@ type Operator struct {
 	SubnetProvider       subnet.Provider
 	InstanceTypeProvider *instancetype.DefaultProvider
 	InstanceProvider     instance.Provider
+	PricingProvider      *pricing.DefaultProvider
 }
 
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
@@ -99,6 +104,13 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get credentials"))
 	}
+	globalCredentials, err := global.NewCredentialsBuilder().
+		WithAk(ak).
+		WithSk(sk).
+		SafeBuild()
+	if err != nil {
+		lo.Must0(fmt.Errorf("unable to get global credentials"))
+	}
 
 	clusterID := os.Getenv("HUAWEICLOUD_CCE_CLUSTER_ID")
 	if clusterID == "" {
@@ -112,13 +124,16 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	lo.Must0(versionProvider.UpdateVersionWithValidation(ctx))
 
 	ecsApi := sdk.NewECSService(ecsReg, credentials, config.DefaultHttpConfig())
+	bssApi := sdk.NewBSSService(billingRegion(reg), globalCredentials, config.DefaultHttpConfig())
 	cceApi := sdk.NewCCEService(cceReg, credentials, config.DefaultHttpConfig())
 	instanceProvider := instance.NewDefaultProvider(clusterID, cceApi, ecsApi, subnetProvider)
+	pricingProvider := pricing.NewDefaultProvider(bssApi, reg, credentials.ProjectId)
 	instanceTypeProvider := instancetype.NewDefaultProvider(
 		ecsApi,
 		cache.New(InstanceTypesZonesAndOfferingsTTL, DefaultCleanupInterval),
 		cache.New(DiscoveredCapacityCacheTTL, DefaultCleanupInterval),
 		instancetype.NewDefaultResolver(reg),
+		pricingProvider.OnDemandPrice,
 	)
 
 	if err := instanceTypeProvider.UpdateInstanceTypes(ctx); err != nil {
@@ -127,11 +142,19 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	if err := instanceTypeProvider.UpdateInstanceTypeOfferings(ctx); err != nil {
 		logger.Error(err, "failed to preload instance type offerings")
 	}
+	if err := pricingProvider.UpdateOnDemandPricing(ctx, instanceTypeProvider.InstanceTypeInfos()); err != nil {
+		logger.Error(err, "failed to preload on-demand pricing")
+	}
 	return ctx, &Operator{
 		Operator:             operator,
 		VersionProvider:      versionProvider,
 		SubnetProvider:       subnetProvider,
 		InstanceTypeProvider: instanceTypeProvider,
 		InstanceProvider:     instanceProvider,
+		PricingProvider:      pricingProvider,
 	}
+}
+
+func billingRegion(regionID string) *coreRegion.Region {
+	return coreRegion.NewRegion(regionID, BillingEndpoint)
 }
