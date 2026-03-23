@@ -19,6 +19,7 @@ package instancetype
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -41,30 +42,29 @@ import (
 	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
 )
 
-type InstanceType string
-
 type NodeClass interface {
 	KubeletConfiguration() *v1alpha1.KubeletConfiguration
 	Zones() []string
 }
 
 type Provider interface {
-	Get(context.Context, NodeClass, InstanceType) (*cloudprovider.InstanceType, error)
+	Get(context.Context, NodeClass, sdk.InstanceType) (*cloudprovider.InstanceType, error)
 	List(context.Context, NodeClass) ([]*cloudprovider.InstanceType, error)
 }
 
 type DefaultProvider struct {
 	ecsapi                sdk.ECSAPI
 	instanceTypesResolver Resolver
+	onDemandPrice         func(sdk.InstanceType) (float64, bool)
 
 	muFetch       sync.Mutex
 	fetchDone     bool
 	instanceTypes []ecsMdl.Flavor
 
 	muInstanceTypes   sync.RWMutex
-	instanceTypesInfo map[InstanceType]ecsMdl.Flavor
+	instanceTypesInfo map[sdk.InstanceType]ecsMdl.Flavor
 
-	instanceTypesOfferings map[InstanceType]sets.Set[string]
+	instanceTypesOfferings map[sdk.InstanceType]sets.Set[string]
 	allZones               sets.Set[string]
 
 	instanceTypesCache      *cache.Cache
@@ -77,19 +77,32 @@ func NewDefaultProvider(
 	instanceTypesCache *cache.Cache,
 	discoveredCapacityCache *cache.Cache,
 	instanceTypesResolver Resolver,
+	onDemandPrice func(sdk.InstanceType) (float64, bool),
 ) *DefaultProvider {
 	return &DefaultProvider{
 		ecsapi:                  ecsapi,
-		instanceTypesInfo:       map[InstanceType]ecsMdl.Flavor{},
-		instanceTypesOfferings:  map[InstanceType]sets.Set[string]{},
+		instanceTypesInfo:       map[sdk.InstanceType]ecsMdl.Flavor{},
+		instanceTypesOfferings:  map[sdk.InstanceType]sets.Set[string]{},
 		instanceTypesResolver:   instanceTypesResolver,
 		instanceTypesCache:      instanceTypesCache,
 		discoveredCapacityCache: discoveredCapacityCache,
+		onDemandPrice:           onDemandPrice,
 		cm:                      pretty.NewChangeMonitor(),
 	}
 }
 
-func (p *DefaultProvider) Get(ctx context.Context, nodeClass NodeClass, name InstanceType) (*cloudprovider.InstanceType, error) {
+func (p *DefaultProvider) InstanceTypeInfos() map[sdk.InstanceType]ecsMdl.Flavor {
+	p.muInstanceTypes.RLock()
+	defer p.muInstanceTypes.RUnlock()
+
+	instanceTypeInfos := make(map[sdk.InstanceType]ecsMdl.Flavor, len(p.instanceTypesInfo))
+	for instanceType, info := range p.instanceTypesInfo {
+		instanceTypeInfos[instanceType] = info
+	}
+	return instanceTypeInfos
+}
+
+func (p *DefaultProvider) Get(ctx context.Context, nodeClass NodeClass, name sdk.InstanceType) (*cloudprovider.InstanceType, error) {
 	p.muInstanceTypes.RLock()
 	defer p.muInstanceTypes.RUnlock()
 
@@ -106,7 +119,7 @@ func (p *DefaultProvider) Get(ctx context.Context, nodeClass NodeClass, name Ins
 	var instanceType *cloudprovider.InstanceType
 	if item, ok := p.instanceTypesCache.Get(p.cacheKey(nodeClass)); ok {
 		instanceType, _ = lo.Find(item.([]*cloudprovider.InstanceType), func(i *cloudprovider.InstanceType) bool {
-			return InstanceType(i.Name) == name
+			return sdk.InstanceType(i.Name) == name
 		})
 	}
 	if instanceType == nil {
@@ -145,7 +158,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass NodeClass) ([]*clo
 		// so that modifications to the ordering of the data don't affect the original
 		instanceTypes = item.([]*cloudprovider.InstanceType)
 	} else {
-		instanceTypes = lo.FilterMapToSlice(p.instanceTypesInfo, func(name InstanceType, info ecsMdl.Flavor) (*cloudprovider.InstanceType, bool) {
+		instanceTypes = lo.FilterMapToSlice(p.instanceTypesInfo, func(name sdk.InstanceType, info ecsMdl.Flavor) (*cloudprovider.InstanceType, bool) {
 			it, err := p.get(ctx, nodeClass, name)
 			if err != nil {
 				return nil, false
@@ -172,7 +185,7 @@ func (p *DefaultProvider) cacheKey(nodeClass NodeClass) string {
 	return fmt.Sprintf("%016x-%s", subnetZonesHash, itsHash)
 }
 
-func (p *DefaultProvider) get(ctx context.Context, nodeClass NodeClass, name InstanceType) (*cloudprovider.InstanceType, error) {
+func (p *DefaultProvider) get(ctx context.Context, nodeClass NodeClass, name sdk.InstanceType) (*cloudprovider.InstanceType, error) {
 	info, ok := p.instanceTypesInfo[name]
 	if !ok {
 		return nil, fmt.Errorf("instance type %s not found in cache", name)
@@ -180,7 +193,7 @@ func (p *DefaultProvider) get(ctx context.Context, nodeClass NodeClass, name Ins
 	if p.instanceTypesResolver == nil {
 		return nil, fmt.Errorf("instance types resolver is nil")
 	}
-	it := p.instanceTypesResolver.Resolve(ctx, info, p.instanceTypesOfferings[InstanceType(info.Name)].UnsortedList(), nodeClass)
+	it := p.instanceTypesResolver.Resolve(ctx, info, p.instanceTypesOfferings[sdk.InstanceType(info.Name)].UnsortedList(), nodeClass)
 	if it == nil {
 		return nil, fmt.Errorf("failed to generate instance type %s", name)
 	}
@@ -233,7 +246,7 @@ func (p *DefaultProvider) createOfferings(
 	_ = allZones
 
 	subnetZones := sets.New(nodeClass.Zones()...)
-	offeringZones := p.instanceTypesOfferings[InstanceType(it.Name)]
+	offeringZones := p.instanceTypesOfferings[sdk.InstanceType(it.Name)]
 
 	availableZones := sets.New[string](it.Requirements.Get(corev1.LabelTopologyZone).Values()...)
 	if len(availableZones) == 0 {
@@ -254,7 +267,7 @@ func (p *DefaultProvider) createOfferings(
 		for _, capacityType := range capacityTypes {
 			offerings = append(offerings, &cloudprovider.Offering{
 				Available: true,
-				Price:     0,
+				Price:     p.offeringPrice(capacityType, sdk.InstanceType(it.Name)),
 				Requirements: scheduling.NewRequirements(
 					scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType),
 					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
@@ -263,6 +276,20 @@ func (p *DefaultProvider) createOfferings(
 		}
 	}
 	return offerings
+}
+
+func (p *DefaultProvider) offeringPrice(capacityType string, instanceType sdk.InstanceType) float64 {
+	if capacityType != karpv1.CapacityTypeOnDemand {
+		return 0
+	}
+	if p.onDemandPrice == nil {
+		return 0
+	}
+	price, ok := p.onDemandPrice(instanceType)
+	if ok {
+		return price
+	}
+	return math.MaxFloat64
 }
 
 func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
@@ -278,8 +305,8 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 		p.instanceTypesCache.Flush() // None of the cached instance type info is valid when the instance type info changes
 		log.FromContext(ctx).WithValues("count", len(instanceTypes)).V(1).Info("discovered instance types")
 	}
-	p.instanceTypesInfo = lo.SliceToMap(instanceTypes, func(i ecsMdl.Flavor) (InstanceType, ecsMdl.Flavor) {
-		return InstanceType(i.Name), i
+	p.instanceTypesInfo = lo.SliceToMap(instanceTypes, func(i ecsMdl.Flavor) (sdk.InstanceType, ecsMdl.Flavor) {
+		return sdk.InstanceType(i.Name), i
 	})
 	return nil
 }
@@ -289,7 +316,7 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	defer p.muInstanceTypes.Unlock()
 
 	// Get offerings from ECS
-	instanceTypeOfferings := map[InstanceType]sets.Set[string]{}
+	instanceTypeOfferings := map[sdk.InstanceType]sets.Set[string]{}
 
 	instanceTypes, err := p.fetchInstanceTypes()
 	if err != nil {
@@ -307,7 +334,7 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	}
 
 	for _, instanceType := range instanceTypes {
-		instanceTypeOfferings[InstanceType(instanceType.Name)] = resolveOfferingZones(zoneUniverse, instanceType.OsExtraSpecs)
+		instanceTypeOfferings[sdk.InstanceType(instanceType.Name)] = resolveOfferingZones(zoneUniverse, instanceType.OsExtraSpecs)
 	}
 
 	if p.cm.HasChanged("instance-type-offering", instanceTypeOfferings) {

@@ -27,6 +27,7 @@ import (
 	"sigs.k8s.io/karpenter/pkg/events"
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/instancetype"
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/pricing"
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/controllers/nodeclass"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/subnet"
@@ -36,6 +37,7 @@ import (
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/version"
 
 	controllersinstancetype "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/controllers/providers/instancetype"
+	controllerspricing "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/controllers/providers/pricing"
 	controllersversion "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/controllers/providers/version"
 )
 
@@ -49,12 +51,14 @@ func NewControllers(
 	versionProvider *version.DefaultProvider,
 	subnetProvider subnet.Provider,
 	instanceTypeProvider *instancetype.DefaultProvider,
+	pricingProvider *pricing.DefaultProvider,
 ) []controller.Controller {
 	controllers := []controller.Controller{
 		controllersversion.NewController(versionProvider, versionProvider.UpdateVersionWithValidation),
 		status.NewController[*v1alpha1.ECSNodeClass](kubeClient, mgr.GetEventRecorderFor("karpenter"), status.EmitDeprecatedMetrics),
 		nodeclass.NewController(kubeClient, recorder, subnetProvider),
 		controllersinstancetype.NewController(instanceTypeProvider),
+		controllerspricing.NewController(pricingProvider, instanceTypeProvider),
 	}
 	return controllers
 }

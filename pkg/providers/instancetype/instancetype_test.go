@@ -17,11 +17,17 @@ limitations under the License.
 package instancetype
 
 import (
+	"context"
+	"math"
 	"testing"
 
 	ecsMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/model"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/karpenter/pkg/cloudprovider"
+
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
+	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
 )
 
 func TestParseCondOperationAZ(t *testing.T) {
@@ -90,6 +96,71 @@ func TestComputeRequirements_UsesSubnetZonesWhenOfferingZonesEmpty(t *testing.T)
 	if gotOS.Len() != 1 || !gotOS.Has(string(corev1.Linux)) {
 		t.Fatalf("expected os {linux}, got %v", gotOS.UnsortedList())
 	}
+}
+
+func TestCreateOfferings_InjectsOnDemandPrice(t *testing.T) {
+	p := NewDefaultProvider(nil, nil, nil, nil, func(instanceType sdk.InstanceType) (float64, bool) {
+		if instanceType != "c6.large.2" {
+			return 0, false
+		}
+		return 0.42, true
+	})
+	p.instanceTypesOfferings = map[sdk.InstanceType]sets.Set[string]{
+		"c6.large.2": sets.New[string]("cn-north-4a"),
+	}
+
+	offerings := p.createOfferings(context.Background(), &cloudprovider.InstanceType{
+		Name: "c6.large.2",
+		Requirements: computeRequirements(ecsMdl.Flavor{
+			Name:  "c6.large.2",
+			Ram:   4096,
+			Vcpus: "2",
+		}, "cn-north-4", []string{"cn-north-4a"}, []string{"cn-north-4a"}),
+	}, fakeNodeClass{zones: []string{"cn-north-4a"}}, sets.New[string]("cn-north-4a"))
+
+	if len(offerings) != 1 {
+		t.Fatalf("expected 1 offering, got %d", len(offerings))
+	}
+	if offerings[0].Price != 0.42 {
+		t.Fatalf("expected price 0.42, got %f", offerings[0].Price)
+	}
+}
+
+func TestCreateOfferings_UnknownOnDemandPriceUsesMaxFloat(t *testing.T) {
+	p := NewDefaultProvider(nil, nil, nil, nil, func(sdk.InstanceType) (float64, bool) {
+		return 0, false
+	})
+	p.instanceTypesOfferings = map[sdk.InstanceType]sets.Set[string]{
+		"c6.large.2": sets.New[string]("cn-north-4a"),
+	}
+
+	offerings := p.createOfferings(context.Background(), &cloudprovider.InstanceType{
+		Name: "c6.large.2",
+		Requirements: computeRequirements(ecsMdl.Flavor{
+			Name:  "c6.large.2",
+			Ram:   4096,
+			Vcpus: "2",
+		}, "cn-north-4", []string{"cn-north-4a"}, []string{"cn-north-4a"}),
+	}, fakeNodeClass{zones: []string{"cn-north-4a"}}, sets.New[string]("cn-north-4a"))
+
+	if len(offerings) != 1 {
+		t.Fatalf("expected 1 offering, got %d", len(offerings))
+	}
+	if offerings[0].Price != math.MaxFloat64 {
+		t.Fatalf("expected price %f, got %f", math.MaxFloat64, offerings[0].Price)
+	}
+}
+
+type fakeNodeClass struct {
+	zones []string
+}
+
+func (f fakeNodeClass) KubeletConfiguration() *v1alpha1.KubeletConfiguration {
+	return nil
+}
+
+func (f fakeNodeClass) Zones() []string {
+	return f.zones
 }
 
 func stringPtr(v string) *string {

@@ -64,6 +64,7 @@ func main() {
 			op.VersionProvider,
 			op.SubnetProvider,
 			op.InstanceTypeProvider,
+			op.PricingProvider,
 		)...).
 		Start(ctx)
 }
