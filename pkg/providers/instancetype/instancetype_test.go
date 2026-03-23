@@ -18,6 +18,7 @@ package instancetype
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"testing"
 
@@ -29,6 +30,70 @@ import (
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
 	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
 )
+
+func TestFetchInstanceTypes_PaginatesListFlavors(t *testing.T) {
+	firstPage := make([]ecsMdl.Flavor, listFlavorsPageSize)
+	for i := range firstPage {
+		id := fmt.Sprintf("flavor-%04d", i)
+		firstPage[i] = ecsMdl.Flavor{Id: id, Name: id}
+	}
+	secondPage := []ecsMdl.Flavor{
+		{Id: "flavor-1000", Name: "flavor-1000"},
+		{Id: "flavor-1001", Name: "flavor-1001"},
+	}
+
+	fakeAPI := &fakeECSAPI{
+		listFlavorsFunc: func(request *ecsMdl.ListFlavorsRequest) (*ecsMdl.ListFlavorsResponse, error) {
+			if request.Limit == nil || *request.Limit != listFlavorsPageSize {
+				t.Fatalf("expected list flavors limit %d, got %+v", listFlavorsPageSize, request.Limit)
+			}
+			switch {
+			case request.Marker == nil:
+				return &ecsMdl.ListFlavorsResponse{Flavors: &firstPage}, nil
+			case *request.Marker == firstPage[len(firstPage)-1].Id:
+				return &ecsMdl.ListFlavorsResponse{Flavors: &secondPage}, nil
+			default:
+				t.Fatalf("unexpected marker %q", *request.Marker)
+				return nil, nil
+			}
+		},
+	}
+
+	p := NewDefaultProvider(fakeAPI, nil, nil, nil, func(sdk.InstanceType) (float64, bool) {
+		return 0, false
+	})
+
+	flavors, err := p.fetchInstanceTypes()
+	if err != nil {
+		t.Fatalf("expected no error fetching instance types, got %v", err)
+	}
+	if len(flavors) != len(firstPage)+len(secondPage) {
+		t.Fatalf("expected %d flavors, got %d", len(firstPage)+len(secondPage), len(flavors))
+	}
+	if fakeAPI.listFlavorsCalls != 2 {
+		t.Fatalf("expected 2 list flavors calls, got %d", fakeAPI.listFlavorsCalls)
+	}
+	if len(fakeAPI.listFlavorsRequests) != 2 {
+		t.Fatalf("expected 2 captured requests, got %d", len(fakeAPI.listFlavorsRequests))
+	}
+	if fakeAPI.listFlavorsRequests[0].Marker != nil {
+		t.Fatalf("expected first request marker to be nil, got %q", *fakeAPI.listFlavorsRequests[0].Marker)
+	}
+	if fakeAPI.listFlavorsRequests[1].Marker == nil || *fakeAPI.listFlavorsRequests[1].Marker != firstPage[len(firstPage)-1].Id {
+		t.Fatalf("expected second request marker %q, got %+v", firstPage[len(firstPage)-1].Id, fakeAPI.listFlavorsRequests[1].Marker)
+	}
+
+	cachedFlavors, err := p.fetchInstanceTypes()
+	if err != nil {
+		t.Fatalf("expected cached fetch to succeed, got %v", err)
+	}
+	if len(cachedFlavors) != len(flavors) {
+		t.Fatalf("expected cached flavors length %d, got %d", len(flavors), len(cachedFlavors))
+	}
+	if fakeAPI.listFlavorsCalls != 2 {
+		t.Fatalf("expected cached fetch not to call list flavors again, got %d calls", fakeAPI.listFlavorsCalls)
+	}
+}
 
 func TestParseCondOperationAZ(t *testing.T) {
 	got := parseCondOperationAZ("cn-south-2b(normal), cn-south-1c(sellout),cn-south-1e(obt)，cn-south-1f(promotion); cn-south-1g(abandon)")
@@ -155,12 +220,36 @@ type fakeNodeClass struct {
 	zones []string
 }
 
+type fakeECSAPI struct {
+	listFlavorsFunc     func(*ecsMdl.ListFlavorsRequest) (*ecsMdl.ListFlavorsResponse, error)
+	listFlavorsCalls    int
+	listFlavorsRequests []*ecsMdl.ListFlavorsRequest
+}
+
 func (f fakeNodeClass) KubeletConfiguration() *v1alpha1.KubeletConfiguration {
 	return nil
 }
 
 func (f fakeNodeClass) Zones() []string {
 	return f.zones
+}
+
+func (f *fakeECSAPI) ListServersDetails(*ecsMdl.ListServersDetailsRequest) (*ecsMdl.ListServersDetailsResponse, error) {
+	return &ecsMdl.ListServersDetailsResponse{}, nil
+}
+
+func (f *fakeECSAPI) BatchCreateServerTags(*ecsMdl.BatchCreateServerTagsRequest) (*ecsMdl.BatchCreateServerTagsResponse, error) {
+	return &ecsMdl.BatchCreateServerTagsResponse{}, nil
+}
+
+func (f *fakeECSAPI) ListFlavors(request *ecsMdl.ListFlavorsRequest) (*ecsMdl.ListFlavorsResponse, error) {
+	f.listFlavorsCalls++
+	requestCopy := *request
+	f.listFlavorsRequests = append(f.listFlavorsRequests, &requestCopy)
+	if f.listFlavorsFunc == nil {
+		return &ecsMdl.ListFlavorsResponse{}, nil
+	}
+	return f.listFlavorsFunc(request)
 }
 
 func stringPtr(v string) *string {
