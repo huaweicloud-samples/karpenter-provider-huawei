@@ -42,6 +42,8 @@ import (
 	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
 )
 
+const listFlavorsPageSize int32 = 1000
+
 type NodeClass interface {
 	KubeletConfiguration() *v1alpha1.KubeletConfiguration
 	Zones() []string
@@ -447,11 +449,34 @@ func (p *DefaultProvider) fetchInstanceTypes() ([]ecsMdl.Flavor, error) {
 	if p.fetchDone {
 		return p.instanceTypes, nil
 	}
-	flavorsResponse, err := p.ecsapi.ListFlavors(&ecsMdl.ListFlavorsRequest{})
-	if err != nil {
-		return nil, serrors.Wrap(fmt.Errorf("list flavors, %w", err))
+
+	request := &ecsMdl.ListFlavorsRequest{
+		Limit: lo.ToPtr(listFlavorsPageSize),
 	}
-	p.instanceTypes = *flavorsResponse.Flavors
+	instanceTypes := make([]ecsMdl.Flavor, 0, listFlavorsPageSize)
+	for {
+		flavorsResponse, err := p.ecsapi.ListFlavors(request)
+		if err != nil {
+			return nil, serrors.Wrap(fmt.Errorf("list flavors, %w", err))
+		}
+
+		pageFlavors := lo.FromPtr(flavorsResponse.Flavors)
+		instanceTypes = append(instanceTypes, pageFlavors...)
+		if int32(len(pageFlavors)) < listFlavorsPageSize {
+			break
+		}
+
+		lastFlavorID := pageFlavors[len(pageFlavors)-1].Id
+		if lastFlavorID == "" {
+			return nil, serrors.Wrap(fmt.Errorf("list flavors pagination, empty flavor id at page boundary"))
+		}
+		if request.Marker != nil && *request.Marker == lastFlavorID {
+			return nil, serrors.Wrap(fmt.Errorf("list flavors pagination, marker did not advance"))
+		}
+		request.Marker = lo.ToPtr(lastFlavorID)
+	}
+
+	p.instanceTypes = instanceTypes
 	p.fetchDone = true
 	return p.instanceTypes, nil
 }
