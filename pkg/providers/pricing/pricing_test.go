@@ -18,9 +18,11 @@ package pricing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
+	sdkerr "github.com/huaweicloud/huaweicloud-sdk-go-v3/core/sdkerr"
 	bssMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/bss/v2/model"
 	ecsMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/model"
 	"github.com/shopspring/decimal"
@@ -134,7 +136,7 @@ func TestUpdateOnDemandPricingSkipsUnsupportedProducts(t *testing.T) {
 		fn: func(request *bssMdl.ListOnDemandResourceRatingsRequest) (*bssMdl.ListOnDemandResourceRatingsResponse, error) {
 			productInfos := request.Body.ProductInfos
 			if len(productInfos) == 2 {
-				return nil, fmt.Errorf("Can not find product bad.large.1.linux")
+				return nil, newProductNotFoundError("bad.large.1.linux")
 			}
 			if len(productInfos) != 1 {
 				t.Fatalf("expected retried request with 1 product info, got %d", len(productInfos))
@@ -194,7 +196,7 @@ func TestUpdateOnDemandPricingSkipsUnsupportedProductsByResourceSpec(t *testing.
 		fn: func(request *bssMdl.ListOnDemandResourceRatingsRequest) (*bssMdl.ListOnDemandResourceRatingsResponse, error) {
 			productInfos := request.Body.ProductInfos
 			if len(productInfos) == 2 {
-				return nil, fmt.Errorf("Can not find product bad.large.1.billing.linux")
+				return nil, newProductNotFoundError("bad.large.1.billing.linux")
 			}
 			if len(productInfos) != 1 {
 				t.Fatalf("expected retried request with 1 product info, got %d", len(productInfos))
@@ -244,6 +246,132 @@ func TestUpdateOnDemandPricingSkipsUnsupportedProductsByResourceSpec(t *testing.
 	}
 }
 
+func TestUpdateOnDemandPricingClearsCachedPriceWhenAllProductsUnsupported(t *testing.T) {
+	api := &stubPricingAPI{
+		response: &bssMdl.ListOnDemandResourceRatingsResponse{
+			ProductRatingResults: &[]bssMdl.DemandProductRatingResult{
+				{
+					Id:     stringPtr("bad.large.1"),
+					Amount: decimalPtr(decimal.NewFromFloat(0.42)),
+				},
+			},
+		},
+	}
+	provider := NewDefaultProvider(api, "ap-southeast-3", func() string { return "project-id" })
+	instanceTypeInfos := map[sdk.InstanceType]ecsMdl.Flavor{
+		"bad.large.1": {
+			Id:   "bad.large.1",
+			Name: "bad.large.1",
+		},
+	}
+
+	if err := provider.UpdateOnDemandPricing(context.Background(), instanceTypeInfos); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if _, ok := provider.OnDemandPrice("bad.large.1"); !ok {
+		t.Fatalf("expected initial cached price to exist")
+	}
+
+	api.requests = nil
+	api.fn = func(request *bssMdl.ListOnDemandResourceRatingsRequest) (*bssMdl.ListOnDemandResourceRatingsResponse, error) {
+		return nil, newProductNotFoundError("bad.large.1.linux")
+	}
+	if err := provider.UpdateOnDemandPricing(context.Background(), instanceTypeInfos); err != nil {
+		t.Fatalf("expected nil error when all products become unsupported, got %v", err)
+	}
+	if len(api.requests) != 1 {
+		t.Fatalf("expected 1 pricing request, got %d", len(api.requests))
+	}
+	if _, ok := provider.OnDemandPrice("bad.large.1"); ok {
+		t.Fatalf("expected unsupported product cached price to be cleared")
+	}
+
+	api.requests = nil
+	if err := provider.UpdateOnDemandPricing(context.Background(), instanceTypeInfos); err != nil {
+		t.Fatalf("expected nil error when all products are already unsupported, got %v", err)
+	}
+	if len(api.requests) != 0 {
+		t.Fatalf("expected no pricing requests after product is marked unsupported, got %d", len(api.requests))
+	}
+}
+
+func TestUpdateOnDemandPricingClearsCachedPriceWhenNoPriceReturned(t *testing.T) {
+	api := &stubPricingAPI{
+		responses: []*bssMdl.ListOnDemandResourceRatingsResponse{
+			{
+				ProductRatingResults: &[]bssMdl.DemandProductRatingResult{
+					{
+						Id:     stringPtr("c6.large.2"),
+						Amount: decimalPtr(decimal.NewFromFloat(0.42)),
+					},
+				},
+			},
+			{},
+		},
+	}
+	provider := NewDefaultProvider(api, "cn-north-4", func() string { return "project-id" })
+	instanceTypeInfos := map[sdk.InstanceType]ecsMdl.Flavor{
+		"c6.large.2": {
+			Id:   "c6.large.2",
+			Name: "c6.large.2",
+		},
+	}
+
+	if err := provider.UpdateOnDemandPricing(context.Background(), instanceTypeInfos); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if _, ok := provider.OnDemandPrice("c6.large.2"); !ok {
+		t.Fatalf("expected initial cached price to exist")
+	}
+
+	if err := provider.UpdateOnDemandPricing(context.Background(), instanceTypeInfos); err != nil {
+		t.Fatalf("expected nil error when response contains no prices, got %v", err)
+	}
+	if _, ok := provider.OnDemandPrice("c6.large.2"); ok {
+		t.Fatalf("expected cached price to be cleared when no price is returned")
+	}
+}
+
+func TestUnsupportedProductResourceSpecUsesStructuredErrorCode(t *testing.T) {
+	resourceSpec, ok := unsupportedProductResourceSpec(newProductNotFoundError("bad.large.1.linux"))
+	if !ok {
+		t.Fatalf("expected product-not-found error to be recognized")
+	}
+	if resourceSpec != "bad.large.1.linux" {
+		t.Fatalf("expected resource spec bad.large.1.linux, got %q", resourceSpec)
+	}
+}
+
+func TestUnsupportedProductResourceSpecRejectsNonServiceErrors(t *testing.T) {
+	resourceSpec, ok := unsupportedProductResourceSpec(errors.New("Can not find product bad.large.1.linux"))
+	if ok {
+		t.Fatalf("expected plain error to be ignored, got %q", resourceSpec)
+	}
+}
+
+func TestProductResourceSpecFromMessageHandlesDelimitersWithoutGoto(t *testing.T) {
+	testCases := map[string]string{
+		`Can not find product bad.large.1.linux"`: "bad.large.1.linux",
+		`Can not find product bad.large.1.linux\`: "bad.large.1.linux",
+		`Can not find product bad.large.1.linux,`: "bad.large.1.linux",
+		`Can not find product bad.large.1.linux]`: "bad.large.1.linux",
+		`Can not find product bad.large.1.linux `: "bad.large.1.linux",
+		`prefix Can not find product bad.large.1`: "bad.large.1",
+	}
+
+	for message, expected := range testCases {
+		t.Run(expected, func(t *testing.T) {
+			resourceSpec, ok := productResourceSpecFromMessage(message)
+			if !ok {
+				t.Fatalf("expected resource spec to be extracted from %q", message)
+			}
+			if resourceSpec != expected {
+				t.Fatalf("expected resource spec %q, got %q", expected, resourceSpec)
+			}
+		})
+	}
+}
+
 type stubPricingAPI struct {
 	requests  []*bssMdl.ListOnDemandResourceRatingsRequest
 	response  *bssMdl.ListOnDemandResourceRatingsResponse
@@ -267,6 +395,20 @@ func (s *stubPricingAPI) ListOnDemandResourceRatings(request *bssMdl.ListOnDeman
 	}
 	return s.response, nil
 }
+
+func newProductNotFoundError(resourceSpec string) error {
+	return &sdkerr.ServiceResponseError{
+		StatusCode: 400,
+		ErrorCode:  bssWrappedProductNotFoundCode,
+		ErrorMessage: fmt.Sprintf(
+			`Product not found..cse://CSBBillingRatingService/rest/cbc/csbbillingratingservice/v2/inquiry/ondemand_resource[error_code]:%s[msg]:{"error_code":"%s","error_msg":"Can not find product %s","error_list":[]}`,
+			bssProductNotFoundCode,
+			bssProductNotFoundCode,
+			resourceSpec,
+		),
+	}
+}
+
 func stringPtr(v string) *string {
 	return &v
 }

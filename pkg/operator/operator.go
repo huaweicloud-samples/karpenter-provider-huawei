@@ -104,7 +104,6 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get credentials"))
 	}
-	httpConfig := config.DefaultHttpConfig()
 	globalCredentials, err := global.NewCredentialsBuilder().
 		WithAk(ak).
 		WithSk(sk).
@@ -118,15 +117,15 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		lo.Must0(fmt.Errorf("unable to get CCE cluster id"))
 	}
 
-	vpcApi := sdk.NewVPCService(vpcReg, credentials, httpConfig)
+	vpcApi := sdk.NewVPCService(vpcReg, credentials, config.DefaultHttpConfig())
 	subnetProvider := subnet.NewDefaultProvider(vpcApi, cache.New(DefaultTTL, DefaultCleanupInterval), cache.New(AvailableIPAddressTTL, DefaultCleanupInterval))
 
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)
 	lo.Must0(versionProvider.UpdateVersionWithValidation(ctx))
 
-	ecsApi := sdk.NewECSService(ecsReg, credentials, httpConfig)
-	bssApi := sdk.NewBSSService(billingRegion(reg), globalCredentials, httpConfig)
-	cceApi := sdk.NewCCEService(cceReg, credentials, httpConfig)
+	ecsApi := sdk.NewECSService(ecsReg, credentials, config.DefaultHttpConfig())
+	bssApi := sdk.NewBSSService(billingRegion(reg), globalCredentials, config.DefaultHttpConfig())
+	cceApi := sdk.NewCCEService(cceReg, credentials, config.DefaultHttpConfig())
 	instanceProvider := instance.NewDefaultProvider(clusterID, cceApi, ecsApi, subnetProvider)
 	pricingProvider := pricing.NewDefaultProvider(bssApi, reg, func() string { return credentials.ProjectId })
 	instanceTypeProvider := instancetype.NewDefaultProvider(
