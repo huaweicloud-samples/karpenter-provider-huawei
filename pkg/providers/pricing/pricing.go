@@ -57,8 +57,8 @@ type DefaultProvider struct {
 	pricing sdk.PricingAPI
 	cm      *pretty.ChangeMonitor
 
-	region    string
-	projectID string
+	region            string
+	projectIDProvider func() string
 
 	muOnDemand     sync.RWMutex
 	onDemandPrices map[sdk.InstanceType]float64
@@ -67,14 +67,14 @@ type DefaultProvider struct {
 func NewDefaultProvider(
 	pricing sdk.PricingAPI,
 	region string,
-	projectID string,
+	projectIDProvider func() string,
 ) *DefaultProvider {
 	return &DefaultProvider{
-		pricing:        pricing,
-		cm:             pretty.NewChangeMonitor(),
-		region:         region,
-		projectID:      projectID,
-		onDemandPrices: map[sdk.InstanceType]float64{},
+		pricing:           pricing,
+		cm:                pretty.NewChangeMonitor(),
+		region:            region,
+		projectIDProvider: projectIDProvider,
+		onDemandPrices:    map[sdk.InstanceType]float64{},
 	}
 }
 
@@ -108,14 +108,15 @@ func (p *DefaultProvider) OnDemandPrice(instanceType sdk.InstanceType) (float64,
 }
 
 func (p *DefaultProvider) UpdateOnDemandPricing(ctx context.Context, instanceTypeInfos map[sdk.InstanceType]ecsMdl.Flavor) error {
-	if p.projectID == "" {
+	projectID := p.projectID()
+	if projectID == "" {
 		return fmt.Errorf("project id is empty")
 	}
 	if len(instanceTypeInfos) == 0 {
 		return fmt.Errorf("no instance types found")
 	}
 
-	prices, err := p.fetchOnDemandPricing(p.projectID, instanceTypeInfos)
+	prices, err := p.fetchOnDemandPricing(projectID, instanceTypeInfos)
 	if err != nil {
 		return err
 	}
@@ -131,6 +132,13 @@ func (p *DefaultProvider) UpdateOnDemandPricing(ctx context.Context, instanceTyp
 		log.FromContext(ctx).WithValues("instance-type-count", len(p.onDemandPrices)).V(1).Info("updated on-demand pricing")
 	}
 	return nil
+}
+
+func (p *DefaultProvider) projectID() string {
+	if p.projectIDProvider == nil {
+		return ""
+	}
+	return p.projectIDProvider()
 }
 
 func (p *DefaultProvider) fetchOnDemandPricing(

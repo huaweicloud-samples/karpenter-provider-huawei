@@ -38,7 +38,8 @@ func TestUpdateOnDemandPricing(t *testing.T) {
 			},
 		},
 	}
-	provider := NewDefaultProvider(api, "cn-north-4", "project-id")
+	projectID := "project-id"
+	provider := NewDefaultProvider(api, "cn-north-4", func() string { return projectID })
 	instanceTypeInfos := map[sdk.InstanceType]ecsMdl.Flavor{
 		"c6.large.2": {
 			Id:   "c6.large.2",
@@ -91,6 +92,39 @@ func TestUpdateOnDemandPricing(t *testing.T) {
 	}
 	if api.requests[0].Body.ProjectId != "project-id" {
 		t.Fatalf("expected project id project-id, got %q", api.requests[0].Body.ProjectId)
+	}
+}
+
+func TestUpdateOnDemandPricingUsesLatestProjectID(t *testing.T) {
+	api := &stubPricingAPI{
+		response: &bssMdl.ListOnDemandResourceRatingsResponse{
+			ProductRatingResults: &[]bssMdl.DemandProductRatingResult{
+				{
+					Id:     stringPtr("c6.large.2"),
+					Amount: decimalPtr(decimal.NewFromFloat(0.42)),
+				},
+			},
+		},
+	}
+	projectID := ""
+	provider := NewDefaultProvider(api, "cn-north-4", func() string { return projectID })
+	instanceTypeInfos := map[sdk.InstanceType]ecsMdl.Flavor{
+		"c6.large.2": {
+			Id:   "c6.large.2",
+			Name: "c6.large.2",
+		},
+	}
+
+	projectID = "auto-project-id"
+
+	if err := provider.UpdateOnDemandPricing(context.Background(), instanceTypeInfos); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(api.requests) != 1 {
+		t.Fatalf("expected 1 pricing request, got %d", len(api.requests))
+	}
+	if api.requests[0].Body.ProjectId != "auto-project-id" {
+		t.Fatalf("expected project id auto-project-id, got %q", api.requests[0].Body.ProjectId)
 	}
 }
 
