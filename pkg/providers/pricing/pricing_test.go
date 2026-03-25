@@ -18,6 +18,7 @@ package pricing
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	bssMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/bss/v2/model"
@@ -128,15 +129,134 @@ func TestUpdateOnDemandPricingUsesLatestProjectID(t *testing.T) {
 	}
 }
 
+func TestUpdateOnDemandPricingSkipsUnsupportedProducts(t *testing.T) {
+	api := &stubPricingAPI{
+		fn: func(request *bssMdl.ListOnDemandResourceRatingsRequest) (*bssMdl.ListOnDemandResourceRatingsResponse, error) {
+			productInfos := request.Body.ProductInfos
+			if len(productInfos) == 2 {
+				return nil, fmt.Errorf("Can not find product bad.large.1.linux")
+			}
+			if len(productInfos) != 1 {
+				t.Fatalf("expected retried request with 1 product info, got %d", len(productInfos))
+			}
+			if productInfos[0].Id != "c6.large.2" {
+				t.Fatalf("expected retry to keep c6.large.2, got %q", productInfos[0].Id)
+			}
+			return &bssMdl.ListOnDemandResourceRatingsResponse{
+				ProductRatingResults: &[]bssMdl.DemandProductRatingResult{
+					{
+						Id:     stringPtr("c6.large.2"),
+						Amount: decimalPtr(decimal.NewFromFloat(0.42)),
+					},
+				},
+			}, nil
+		},
+	}
+	provider := NewDefaultProvider(api, "ap-southeast-3", func() string { return "project-id" })
+	instanceTypeInfos := map[sdk.InstanceType]ecsMdl.Flavor{
+		"bad.large.1": {
+			Id:   "bad.large.1",
+			Name: "bad.large.1",
+		},
+		"c6.large.2": {
+			Id:   "c6.large.2",
+			Name: "c6.large.2",
+		},
+	}
+
+	if err := provider.UpdateOnDemandPricing(context.Background(), instanceTypeInfos); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if len(api.requests) != 2 {
+		t.Fatalf("expected 2 pricing requests, got %d", len(api.requests))
+	}
+	if _, ok := provider.OnDemandPrice("bad.large.1"); ok {
+		t.Fatalf("expected unsupported product to have no cached price")
+	}
+	if _, ok := provider.OnDemandPrice("c6.large.2"); !ok {
+		t.Fatalf("expected supported product to have cached price")
+	}
+
+	api.requests = nil
+	if err := provider.UpdateOnDemandPricing(context.Background(), instanceTypeInfos); err != nil {
+		t.Fatalf("expected nil error on second refresh, got %v", err)
+	}
+	if len(api.requests) != 1 {
+		t.Fatalf("expected second refresh to skip unsupported product, got %d requests", len(api.requests))
+	}
+	if got := api.requests[0].Body.ProductInfos; len(got) != 1 || got[0].Id != "c6.large.2" {
+		t.Fatalf("expected second refresh to query only c6.large.2, got %+v", got)
+	}
+}
+
+func TestUpdateOnDemandPricingSkipsUnsupportedProductsByResourceSpec(t *testing.T) {
+	api := &stubPricingAPI{
+		fn: func(request *bssMdl.ListOnDemandResourceRatingsRequest) (*bssMdl.ListOnDemandResourceRatingsResponse, error) {
+			productInfos := request.Body.ProductInfos
+			if len(productInfos) == 2 {
+				return nil, fmt.Errorf("Can not find product bad.large.1.billing.linux")
+			}
+			if len(productInfos) != 1 {
+				t.Fatalf("expected retried request with 1 product info, got %d", len(productInfos))
+			}
+			if productInfos[0].Id != "c6.large.2" {
+				t.Fatalf("expected retry to keep c6.large.2, got %q", productInfos[0].Id)
+			}
+			return &bssMdl.ListOnDemandResourceRatingsResponse{
+				ProductRatingResults: &[]bssMdl.DemandProductRatingResult{
+					{
+						Id:     stringPtr("c6.large.2"),
+						Amount: decimalPtr(decimal.NewFromFloat(0.42)),
+					},
+				},
+			}, nil
+		},
+	}
+	provider := NewDefaultProvider(api, "ap-southeast-3", func() string { return "project-id" })
+	instanceTypeInfos := map[sdk.InstanceType]ecsMdl.Flavor{
+		"bad.large.1": {
+			Id:   "bad.large.1.billing",
+			Name: "bad.large.1",
+		},
+		"c6.large.2": {
+			Id:   "c6.large.2.billing",
+			Name: "c6.large.2",
+		},
+	}
+
+	if err := provider.UpdateOnDemandPricing(context.Background(), instanceTypeInfos); err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if _, ok := provider.OnDemandPrice("bad.large.1"); ok {
+		t.Fatalf("expected unsupported product to have no cached price")
+	}
+
+	api.requests = nil
+	if err := provider.UpdateOnDemandPricing(context.Background(), instanceTypeInfos); err != nil {
+		t.Fatalf("expected nil error on second refresh, got %v", err)
+	}
+	if len(api.requests) != 1 {
+		t.Fatalf("expected second refresh to skip unsupported product, got %d requests", len(api.requests))
+	}
+	got := api.requests[0].Body.ProductInfos
+	if len(got) != 1 || got[0].Id != "c6.large.2" {
+		t.Fatalf("expected second refresh to query only c6.large.2, got %+v", got)
+	}
+}
+
 type stubPricingAPI struct {
 	requests  []*bssMdl.ListOnDemandResourceRatingsRequest
 	response  *bssMdl.ListOnDemandResourceRatingsResponse
 	err       error
 	responses []*bssMdl.ListOnDemandResourceRatingsResponse
+	fn        func(request *bssMdl.ListOnDemandResourceRatingsRequest) (*bssMdl.ListOnDemandResourceRatingsResponse, error)
 }
 
 func (s *stubPricingAPI) ListOnDemandResourceRatings(request *bssMdl.ListOnDemandResourceRatingsRequest) (*bssMdl.ListOnDemandResourceRatingsResponse, error) {
 	s.requests = append(s.requests, request)
+	if s.fn != nil {
+		return s.fn(request)
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
