@@ -18,13 +18,17 @@ package pricing
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/awslabs/operatorpkg/serrors"
+	sdkerr "github.com/huaweicloud/huaweicloud-sdk-go-v3/core/sdkerr"
 	bssMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/bss/v2/model"
 	ecsMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/model"
 	"github.com/shopspring/decimal"
@@ -35,13 +39,16 @@ import (
 )
 
 const (
-	ecsCloudServiceTypeCode       = "hws.service.type.ec2"
-	ecsVMResourceTypeCode         = "hws.resource.type.vm"
-	durationUsageFactor           = "Duration"
-	hourUsageMeasureID      int32 = 4
-	inquiryPrecisionHigh    int32 = 1
-	maxProductsPerBatch           = 100
-	linuxResourceSpecSuffix       = ".linux"
+	ecsCloudServiceTypeCode             = "hws.service.type.ec2"
+	ecsVMResourceTypeCode               = "hws.resource.type.vm"
+	durationUsageFactor                 = "Duration"
+	hourUsageMeasureID            int32 = 4
+	inquiryPrecisionHigh          int32 = 1
+	maxProductsPerBatch                 = 100
+	linuxResourceSpecSuffix             = ".linux"
+	productNotFoundPrefix               = "Can not find product "
+	bssProductNotFoundCode              = "CBC.6006"
+	bssWrappedProductNotFoundCode       = "CBC.99006006"
 )
 
 type Provider interface {
@@ -57,24 +64,38 @@ type DefaultProvider struct {
 	pricing sdk.PricingAPI
 	cm      *pretty.ChangeMonitor
 
-	region    string
-	projectID string
+	region            string
+	projectIDProvider func() string
 
-	muOnDemand     sync.RWMutex
-	onDemandPrices map[sdk.InstanceType]float64
+	muOnDemand          sync.RWMutex
+	onDemandPrices      map[sdk.InstanceType]float64
+	muUnsupported       sync.RWMutex
+	unsupportedProducts map[sdk.InstanceType]struct{}
+}
+
+type demandProductInfo struct {
+	instanceType sdk.InstanceType
+	resourceSpec string
+	productInfo  bssMdl.DemandProductInfo
+}
+
+type serviceErrorPayload struct {
+	ErrorCode    string `json:"error_code"`
+	ErrorMessage string `json:"error_msg"`
 }
 
 func NewDefaultProvider(
 	pricing sdk.PricingAPI,
 	region string,
-	projectID string,
+	projectIDProvider func() string,
 ) *DefaultProvider {
 	return &DefaultProvider{
-		pricing:        pricing,
-		cm:             pretty.NewChangeMonitor(),
-		region:         region,
-		projectID:      projectID,
-		onDemandPrices: map[sdk.InstanceType]float64{},
+		pricing:             pricing,
+		cm:                  pretty.NewChangeMonitor(),
+		region:              region,
+		projectIDProvider:   projectIDProvider,
+		onDemandPrices:      map[sdk.InstanceType]float64{},
+		unsupportedProducts: map[sdk.InstanceType]struct{}{},
 	}
 }
 
@@ -108,38 +129,44 @@ func (p *DefaultProvider) OnDemandPrice(instanceType sdk.InstanceType) (float64,
 }
 
 func (p *DefaultProvider) UpdateOnDemandPricing(ctx context.Context, instanceTypeInfos map[sdk.InstanceType]ecsMdl.Flavor) error {
-	if p.projectID == "" {
+	projectID := p.projectID()
+	if projectID == "" {
 		return fmt.Errorf("project id is empty")
 	}
 	if len(instanceTypeInfos) == 0 {
 		return fmt.Errorf("no instance types found")
 	}
 
-	prices, err := p.fetchOnDemandPricing(p.projectID, instanceTypeInfos)
+	prices, err := p.fetchOnDemandPricing(ctx, projectID, instanceTypeInfos)
 	if err != nil {
 		return err
-	}
-	if len(prices) == 0 {
-		return fmt.Errorf("no on-demand pricing found")
 	}
 
 	p.muOnDemand.Lock()
 	defer p.muOnDemand.Unlock()
 
-	p.onDemandPrices = mergeOnDemandPricing(p.onDemandPrices, prices)
+	p.onDemandPrices = prices
 	if p.cm.HasChanged("on-demand-prices", p.onDemandPrices) {
 		log.FromContext(ctx).WithValues("instance-type-count", len(p.onDemandPrices)).V(1).Info("updated on-demand pricing")
 	}
 	return nil
 }
 
+func (p *DefaultProvider) projectID() string {
+	if p.projectIDProvider == nil {
+		return ""
+	}
+	return p.projectIDProvider()
+}
+
 func (p *DefaultProvider) fetchOnDemandPricing(
+	ctx context.Context,
 	projectID string,
 	instanceTypeInfos map[sdk.InstanceType]ecsMdl.Flavor,
 ) (map[sdk.InstanceType]float64, error) {
-	productInfos := buildDemandProductInfos(p.region, instanceTypeInfos)
+	productInfos := buildDemandProductInfos(p.region, p.filterUnsupportedInstanceTypes(instanceTypeInfos))
 	if len(productInfos) == 0 {
-		return nil, fmt.Errorf("no demand product infos built")
+		return map[sdk.InstanceType]float64{}, nil
 	}
 
 	prices := map[sdk.InstanceType]float64{}
@@ -148,25 +175,52 @@ func (p *DefaultProvider) fetchOnDemandPricing(
 		if end > len(productInfos) {
 			end = len(productInfos)
 		}
-		response, err := p.pricing.ListOnDemandResourceRatings(&bssMdl.ListOnDemandResourceRatingsRequest{
-			Body: &bssMdl.RateOnDemandReq{
-				ProjectId:        projectID,
-				InquiryPrecision: int32Ptr(inquiryPrecisionHigh),
-				ProductInfos:     productInfos[start:end],
-			},
-		})
+		response, err := p.fetchOnDemandPricingBatch(ctx, projectID, productInfos[start:end])
 		if err != nil {
-			return nil, serrors.Wrap(fmt.Errorf("list on-demand resource ratings, %w", err))
+			return nil, err
 		}
 		prices = mergeOnDemandPricing(prices, onDemandPage(response))
 	}
 	return prices, nil
 }
 
+func (p *DefaultProvider) fetchOnDemandPricingBatch(
+	ctx context.Context,
+	projectID string,
+	productInfos []demandProductInfo,
+) (*bssMdl.ListOnDemandResourceRatingsResponse, error) {
+	remaining := append([]demandProductInfo(nil), productInfos...)
+	for len(remaining) > 0 {
+		response, err := p.pricing.ListOnDemandResourceRatings(&bssMdl.ListOnDemandResourceRatingsRequest{
+			Body: &bssMdl.RateOnDemandReq{
+				ProjectId:        projectID,
+				InquiryPrecision: int32Ptr(inquiryPrecisionHigh),
+				ProductInfos:     requestProductInfos(remaining),
+			},
+		})
+		if err == nil {
+			return response, nil
+		}
+
+		resourceSpec, ok := unsupportedProductResourceSpec(err)
+		if !ok {
+			return nil, serrors.Wrap(fmt.Errorf("list on-demand resource ratings, %w", err))
+		}
+
+		filtered, removed := filterOutProductInfoByResourceSpec(remaining, resourceSpec)
+		if len(removed) == 0 {
+			return nil, serrors.Wrap(fmt.Errorf("list on-demand resource ratings, %w", err))
+		}
+		p.markUnsupportedProducts(ctx, removed)
+		remaining = filtered
+	}
+	return &bssMdl.ListOnDemandResourceRatingsResponse{}, nil
+}
+
 func buildDemandProductInfos(
 	region string,
 	instanceTypeInfos map[sdk.InstanceType]ecsMdl.Flavor,
-) []bssMdl.DemandProductInfo {
+) []demandProductInfo {
 	instanceTypes := make([]sdk.InstanceType, 0, len(instanceTypeInfos))
 	for instanceType := range instanceTypeInfos {
 		instanceTypes = append(instanceTypes, instanceType)
@@ -175,19 +229,24 @@ func buildDemandProductInfos(
 		return instanceTypes[i] < instanceTypes[j]
 	})
 
-	productInfos := make([]bssMdl.DemandProductInfo, 0, len(instanceTypes))
+	productInfos := make([]demandProductInfo, 0, len(instanceTypes))
 	for _, instanceType := range instanceTypes {
 		flavor := instanceTypeInfos[instanceType]
-		productInfos = append(productInfos, bssMdl.DemandProductInfo{
-			Id:               string(instanceType),
-			CloudServiceType: ecsCloudServiceTypeCode,
-			ResourceType:     ecsVMResourceTypeCode,
-			ResourceSpec:     resourceSpec(flavor),
-			Region:           region,
-			UsageFactor:      durationUsageFactor,
-			UsageValue:       decimalPtr(decimal.NewFromInt(1)),
-			UsageMeasureId:   hourUsageMeasureID,
-			SubscriptionNum:  1,
+		spec := resourceSpec(flavor)
+		productInfos = append(productInfos, demandProductInfo{
+			instanceType: instanceType,
+			resourceSpec: spec,
+			productInfo: bssMdl.DemandProductInfo{
+				Id:               string(instanceType),
+				CloudServiceType: ecsCloudServiceTypeCode,
+				ResourceType:     ecsVMResourceTypeCode,
+				ResourceSpec:     spec,
+				Region:           region,
+				UsageFactor:      durationUsageFactor,
+				UsageValue:       decimalPtr(decimal.NewFromInt(1)),
+				UsageMeasureId:   hourUsageMeasureID,
+				SubscriptionNum:  1,
+			},
 		})
 	}
 	return productInfos
@@ -227,6 +286,124 @@ func priceFromRatingResult(result bssMdl.DemandProductRatingResult) float64 {
 		return result.OfficialWebsiteAmount.InexactFloat64()
 	}
 	return 0
+}
+
+func requestProductInfos(productInfos []demandProductInfo) []bssMdl.DemandProductInfo {
+	out := make([]bssMdl.DemandProductInfo, 0, len(productInfos))
+	for _, productInfo := range productInfos {
+		out = append(out, productInfo.productInfo)
+	}
+	return out
+}
+
+func filterOutProductInfoByResourceSpec(
+	productInfos []demandProductInfo,
+	resourceSpec string,
+) ([]demandProductInfo, []demandProductInfo) {
+	filtered := make([]demandProductInfo, 0, len(productInfos))
+	removed := make([]demandProductInfo, 0, 1)
+	for _, productInfo := range productInfos {
+		if productInfo.resourceSpec == resourceSpec {
+			removed = append(removed, productInfo)
+			continue
+		}
+		filtered = append(filtered, productInfo)
+	}
+	return filtered, removed
+}
+
+func unsupportedProductResourceSpec(err error) (string, bool) {
+	var serviceErr *sdkerr.ServiceResponseError
+	if !errors.As(err, &serviceErr) {
+		return "", false
+	}
+
+	if payload, ok := serviceErrorPayloadFromMessage(serviceErr.ErrorMessage); ok {
+		if !isUnsupportedProductErrorCode(payload.ErrorCode) {
+			return "", false
+		}
+		return productResourceSpecFromMessage(payload.ErrorMessage)
+	}
+	if !isUnsupportedProductErrorCode(serviceErr.ErrorCode) {
+		return "", false
+	}
+	return productResourceSpecFromMessage(serviceErr.ErrorMessage)
+}
+
+func serviceErrorPayloadFromMessage(message string) (serviceErrorPayload, bool) {
+	start := strings.Index(message, `{"error_code":`)
+	end := strings.LastIndex(message, "}")
+	if start == -1 || end < start {
+		return serviceErrorPayload{}, false
+	}
+
+	var payload serviceErrorPayload
+	if err := json.Unmarshal([]byte(message[start:end+1]), &payload); err != nil {
+		return serviceErrorPayload{}, false
+	}
+	if payload.ErrorCode == "" {
+		return serviceErrorPayload{}, false
+	}
+	return payload, true
+}
+
+func isUnsupportedProductErrorCode(code string) bool {
+	code = strings.TrimSpace(code)
+	return code == bssProductNotFoundCode || code == bssWrappedProductNotFoundCode
+}
+
+func productResourceSpecFromMessage(message string) (string, bool) {
+	idx := strings.Index(message, productNotFoundPrefix)
+	if idx == -1 {
+		return "", false
+	}
+	value := message[idx+len(productNotFoundPrefix):]
+	end := strings.IndexAny(value, "\"\\ ,]")
+	if end == -1 {
+		end = len(value)
+	}
+	resourceSpec := strings.TrimSpace(value[:end])
+	if resourceSpec == "" {
+		return "", false
+	}
+	return resourceSpec, true
+}
+
+func (p *DefaultProvider) markUnsupportedProducts(ctx context.Context, productInfos []demandProductInfo) {
+	instanceTypes := make([]string, 0, len(productInfos))
+	resourceSpecs := make([]string, 0, len(productInfos))
+
+	p.muUnsupported.Lock()
+	defer p.muUnsupported.Unlock()
+
+	for _, productInfo := range productInfos {
+		if _, ok := p.unsupportedProducts[productInfo.instanceType]; ok {
+			continue
+		}
+		p.unsupportedProducts[productInfo.instanceType] = struct{}{}
+		instanceTypes = append(instanceTypes, string(productInfo.instanceType))
+		resourceSpecs = append(resourceSpecs, productInfo.resourceSpec)
+	}
+	if len(instanceTypes) == 0 {
+		return
+	}
+	log.FromContext(ctx).WithValues("instance-types", instanceTypes, "resource-specs", resourceSpecs).Info("skipping unsupported on-demand pricing products")
+}
+
+func (p *DefaultProvider) filterUnsupportedInstanceTypes(
+	instanceTypeInfos map[sdk.InstanceType]ecsMdl.Flavor,
+) map[sdk.InstanceType]ecsMdl.Flavor {
+	p.muUnsupported.RLock()
+	defer p.muUnsupported.RUnlock()
+
+	filtered := make(map[sdk.InstanceType]ecsMdl.Flavor, len(instanceTypeInfos))
+	for instanceType, flavor := range instanceTypeInfos {
+		if _, ok := p.unsupportedProducts[instanceType]; ok {
+			continue
+		}
+		filtered[instanceType] = flavor
+	}
+	return filtered
 }
 
 func mergeOnDemandPricing(
