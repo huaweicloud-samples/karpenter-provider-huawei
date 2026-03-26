@@ -21,8 +21,10 @@ import (
 	"fmt"
 	"math"
 	"testing"
+	"time"
 
 	ecsMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/model"
+	"github.com/patrickmn/go-cache"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -82,16 +84,183 @@ func TestFetchInstanceTypes_PaginatesListFlavors(t *testing.T) {
 	if fakeAPI.listFlavorsRequests[1].Marker == nil || *fakeAPI.listFlavorsRequests[1].Marker != firstPage[len(firstPage)-1].Id {
 		t.Fatalf("expected second request marker %q, got %+v", firstPage[len(firstPage)-1].Id, fakeAPI.listFlavorsRequests[1].Marker)
 	}
+}
 
-	cachedFlavors, err := p.fetchInstanceTypes()
-	if err != nil {
-		t.Fatalf("expected cached fetch to succeed, got %v", err)
+func TestUpdateInstanceTypes_RefreshesFlavorsOnRepeatedCalls(t *testing.T) {
+	call := 0
+	fakeAPI := &fakeECSAPI{
+		listFlavorsFunc: func(request *ecsMdl.ListFlavorsRequest) (*ecsMdl.ListFlavorsResponse, error) {
+			if request.Marker != nil {
+				t.Fatalf("expected marker to be nil for single-page refresh, got %q", *request.Marker)
+			}
+			var flavors []ecsMdl.Flavor
+			switch call {
+			case 0:
+				flavors = []ecsMdl.Flavor{{Id: "flavor-a", Name: "c6.large.2"}}
+			case 1:
+				flavors = []ecsMdl.Flavor{{Id: "flavor-b", Name: "c7.large.2"}}
+			default:
+				t.Fatalf("unexpected refresh call %d", call+1)
+			}
+			call++
+			return &ecsMdl.ListFlavorsResponse{Flavors: &flavors}, nil
+		},
 	}
-	if len(cachedFlavors) != len(flavors) {
-		t.Fatalf("expected cached flavors length %d, got %d", len(flavors), len(cachedFlavors))
+
+	p := NewDefaultProvider(
+		fakeAPI,
+		cache.New(time.Minute, time.Minute),
+		cache.New(time.Minute, time.Minute),
+		nil,
+		func(sdk.InstanceType) (float64, bool) { return 0, false },
+	)
+
+	if err := p.UpdateInstanceTypes(context.Background()); err != nil {
+		t.Fatalf("expected first update to succeed, got %v", err)
+	}
+	if infos := p.InstanceTypeInfos(); len(infos) != 1 || infos["c6.large.2"].Id != "flavor-a" {
+		t.Fatalf("expected first refresh to load c6.large.2/flavor-a, got %+v", infos)
+	}
+
+	if err := p.UpdateInstanceTypes(context.Background()); err != nil {
+		t.Fatalf("expected second update to succeed, got %v", err)
+	}
+	if infos := p.InstanceTypeInfos(); len(infos) != 1 || infos["c7.large.2"].Id != "flavor-b" {
+		t.Fatalf("expected second refresh to replace cache with c7.large.2/flavor-b, got %+v", infos)
 	}
 	if fakeAPI.listFlavorsCalls != 2 {
-		t.Fatalf("expected cached fetch not to call list flavors again, got %d calls", fakeAPI.listFlavorsCalls)
+		t.Fatalf("expected repeated updates to re-fetch flavors, got %d calls", fakeAPI.listFlavorsCalls)
+	}
+}
+
+func TestUpdateInstanceTypeOfferings_RefreshesLatestFlavorAvailability(t *testing.T) {
+	call := 0
+	fakeAPI := &fakeECSAPI{
+		listFlavorsFunc: func(request *ecsMdl.ListFlavorsRequest) (*ecsMdl.ListFlavorsResponse, error) {
+			if request.Marker != nil {
+				t.Fatalf("expected marker to be nil for single-page refresh, got %q", *request.Marker)
+			}
+			var flavors []ecsMdl.Flavor
+			switch call {
+			case 0:
+				flavors = []ecsMdl.Flavor{{
+					Id:   "flavor-a",
+					Name: "c6.large.2",
+					OsExtraSpecs: &ecsMdl.FlavorExtraSpec{
+						Condoperationstatus: stringPtr("normal"),
+						Condoperationaz:     stringPtr("cn-north-4a(normal)"),
+					},
+				}}
+			case 1:
+				flavors = []ecsMdl.Flavor{{
+					Id:   "flavor-a",
+					Name: "c6.large.2",
+					OsExtraSpecs: &ecsMdl.FlavorExtraSpec{
+						Condoperationstatus: stringPtr("normal"),
+						Condoperationaz:     stringPtr("cn-north-4a(sellout)"),
+					},
+				}}
+			default:
+				t.Fatalf("unexpected refresh call %d", call+1)
+			}
+			call++
+			return &ecsMdl.ListFlavorsResponse{Flavors: &flavors}, nil
+		},
+	}
+
+	p := NewDefaultProvider(
+		fakeAPI,
+		cache.New(time.Minute, time.Minute),
+		cache.New(time.Minute, time.Minute),
+		nil,
+		func(sdk.InstanceType) (float64, bool) { return 0, false },
+	)
+
+	if err := p.UpdateInstanceTypeOfferings(context.Background()); err != nil {
+		t.Fatalf("expected first offering refresh to succeed, got %v", err)
+	}
+	if zones := p.instanceTypesOfferings["c6.large.2"]; zones.Len() != 1 || !zones.Has("cn-north-4a") {
+		t.Fatalf("expected cn-north-4a to be available after first refresh, got %v", zones.UnsortedList())
+	}
+
+	if err := p.UpdateInstanceTypeOfferings(context.Background()); err != nil {
+		t.Fatalf("expected second offering refresh to succeed, got %v", err)
+	}
+	if zones := p.instanceTypesOfferings["c6.large.2"]; zones.Len() != 0 {
+		t.Fatalf("expected cn-north-4a to be removed after sellout refresh, got %v", zones.UnsortedList())
+	}
+	if fakeAPI.listFlavorsCalls != 2 {
+		t.Fatalf("expected repeated offering updates to re-fetch flavors, got %d calls", fakeAPI.listFlavorsCalls)
+	}
+}
+
+func TestRefresh_UsesSingleFetchPerRefreshAndUpdatesTypesAndOfferings(t *testing.T) {
+	call := 0
+	fakeAPI := &fakeECSAPI{
+		listFlavorsFunc: func(request *ecsMdl.ListFlavorsRequest) (*ecsMdl.ListFlavorsResponse, error) {
+			if request.Marker != nil {
+				t.Fatalf("expected marker to be nil for single-page refresh, got %q", *request.Marker)
+			}
+			var flavors []ecsMdl.Flavor
+			switch call {
+			case 0:
+				flavors = []ecsMdl.Flavor{{
+					Id:   "flavor-a",
+					Name: "c6.large.2",
+					OsExtraSpecs: &ecsMdl.FlavorExtraSpec{
+						Condoperationstatus: stringPtr("normal"),
+						Condoperationaz:     stringPtr("cn-north-4a(normal)"),
+					},
+				}}
+			case 1:
+				flavors = []ecsMdl.Flavor{{
+					Id:   "flavor-b",
+					Name: "c7.large.2",
+					OsExtraSpecs: &ecsMdl.FlavorExtraSpec{
+						Condoperationstatus: stringPtr("normal"),
+						Condoperationaz:     stringPtr("cn-north-4b(normal)"),
+					},
+				}}
+			default:
+				t.Fatalf("unexpected refresh call %d", call+1)
+			}
+			call++
+			return &ecsMdl.ListFlavorsResponse{Flavors: &flavors}, nil
+		},
+	}
+
+	p := NewDefaultProvider(
+		fakeAPI,
+		cache.New(time.Minute, time.Minute),
+		cache.New(time.Minute, time.Minute),
+		nil,
+		func(sdk.InstanceType) (float64, bool) { return 0, false },
+	)
+
+	if err := p.Refresh(context.Background()); err != nil {
+		t.Fatalf("expected first refresh to succeed, got %v", err)
+	}
+	if fakeAPI.listFlavorsCalls != 1 {
+		t.Fatalf("expected first refresh to fetch flavors once, got %d calls", fakeAPI.listFlavorsCalls)
+	}
+	if infos := p.InstanceTypeInfos(); len(infos) != 1 || infos["c6.large.2"].Id != "flavor-a" {
+		t.Fatalf("expected first refresh to load c6.large.2/flavor-a, got %+v", infos)
+	}
+	if zones := p.instanceTypesOfferings["c6.large.2"]; zones.Len() != 1 || !zones.Has("cn-north-4a") {
+		t.Fatalf("expected first refresh to expose cn-north-4a, got %v", zones.UnsortedList())
+	}
+
+	if err := p.Refresh(context.Background()); err != nil {
+		t.Fatalf("expected second refresh to succeed, got %v", err)
+	}
+	if fakeAPI.listFlavorsCalls != 2 {
+		t.Fatalf("expected second refresh to fetch flavors once more, got %d calls", fakeAPI.listFlavorsCalls)
+	}
+	if infos := p.InstanceTypeInfos(); len(infos) != 1 || infos["c7.large.2"].Id != "flavor-b" {
+		t.Fatalf("expected second refresh to replace cache with c7.large.2/flavor-b, got %+v", infos)
+	}
+	if zones := p.instanceTypesOfferings["c7.large.2"]; zones.Len() != 1 || !zones.Has("cn-north-4b") {
+		t.Fatalf("expected second refresh to expose cn-north-4b, got %v", zones.UnsortedList())
 	}
 }
 

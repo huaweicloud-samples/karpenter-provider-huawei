@@ -59,9 +59,7 @@ type DefaultProvider struct {
 	instanceTypesResolver Resolver
 	onDemandPrice         func(sdk.InstanceType) (float64, bool)
 
-	muFetch       sync.Mutex
-	fetchDone     bool
-	instanceTypes []ecsMdl.Flavor
+	muFetch sync.Mutex
 
 	muInstanceTypes   sync.RWMutex
 	instanceTypesInfo map[sdk.InstanceType]ecsMdl.Flavor
@@ -294,13 +292,33 @@ func (p *DefaultProvider) offeringPrice(capacityType string, instanceType sdk.In
 	return math.MaxFloat64
 }
 
-func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
-	p.muInstanceTypes.Lock()
-	defer p.muInstanceTypes.Unlock()
+func (p *DefaultProvider) Refresh(ctx context.Context) error {
 	instanceTypes, err := p.fetchInstanceTypes()
 	if err != nil {
 		return err
 	}
+
+	p.muInstanceTypes.Lock()
+	defer p.muInstanceTypes.Unlock()
+
+	p.updateInstanceTypesLocked(ctx, instanceTypes)
+	p.updateInstanceTypeOfferingsLocked(ctx, instanceTypes)
+	return nil
+}
+
+func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
+	instanceTypes, err := p.fetchInstanceTypes()
+	if err != nil {
+		return err
+	}
+
+	p.muInstanceTypes.Lock()
+	defer p.muInstanceTypes.Unlock()
+	p.updateInstanceTypesLocked(ctx, instanceTypes)
+	return nil
+}
+
+func (p *DefaultProvider) updateInstanceTypesLocked(ctx context.Context, instanceTypes []ecsMdl.Flavor) {
 	if p.cm.HasChanged("instance-types", instanceTypes) {
 		// Only update instanceTypesSeqNum with the instance types have been changed
 		// This is to not create new keys with duplicate instance types option
@@ -310,20 +328,23 @@ func (p *DefaultProvider) UpdateInstanceTypes(ctx context.Context) error {
 	p.instanceTypesInfo = lo.SliceToMap(instanceTypes, func(i ecsMdl.Flavor) (sdk.InstanceType, ecsMdl.Flavor) {
 		return sdk.InstanceType(i.Name), i
 	})
-	return nil
 }
 
 func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error {
-	p.muInstanceTypes.Lock()
-	defer p.muInstanceTypes.Unlock()
-
-	// Get offerings from ECS
-	instanceTypeOfferings := map[sdk.InstanceType]sets.Set[string]{}
-
 	instanceTypes, err := p.fetchInstanceTypes()
 	if err != nil {
 		return err
 	}
+
+	p.muInstanceTypes.Lock()
+	defer p.muInstanceTypes.Unlock()
+	p.updateInstanceTypeOfferingsLocked(ctx, instanceTypes)
+	return nil
+}
+
+func (p *DefaultProvider) updateInstanceTypeOfferingsLocked(ctx context.Context, instanceTypes []ecsMdl.Flavor) {
+	// Get offerings from ECS
+	instanceTypeOfferings := map[sdk.InstanceType]sets.Set[string]{}
 
 	zoneUniverse := sets.New[string]()
 	for _, instanceType := range instanceTypes {
@@ -358,7 +379,6 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 		log.FromContext(ctx).WithValues("zones", allZones.UnsortedList()).V(1).Info("discovered zones")
 	}
 	p.allZones = allZones
-	return nil
 }
 
 func resolveOfferingZones(zoneUniverse sets.Set[string], extraSpecs *ecsMdl.FlavorExtraSpec) sets.Set[string] {
@@ -446,9 +466,6 @@ func (p *DefaultProvider) UpdateInstanceTypeCapacityFromNode(ctx context.Context
 func (p *DefaultProvider) fetchInstanceTypes() ([]ecsMdl.Flavor, error) {
 	p.muFetch.Lock()
 	defer p.muFetch.Unlock()
-	if p.fetchDone {
-		return p.instanceTypes, nil
-	}
 
 	request := &ecsMdl.ListFlavorsRequest{
 		Limit: lo.ToPtr(listFlavorsPageSize),
@@ -475,8 +492,5 @@ func (p *DefaultProvider) fetchInstanceTypes() ([]ecsMdl.Flavor, error) {
 		}
 		request.Marker = lo.ToPtr(lastFlavorID)
 	}
-
-	p.instanceTypes = instanceTypes
-	p.fetchDone = true
-	return p.instanceTypes, nil
+	return instanceTypes, nil
 }

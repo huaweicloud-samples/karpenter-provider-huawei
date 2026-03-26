@@ -23,8 +23,6 @@ import (
 
 	"github.com/awslabs/operatorpkg/reconciler"
 	"github.com/awslabs/operatorpkg/singleton"
-	"github.com/samber/lo"
-	"go.uber.org/multierr"
 	controllerruntime "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/karpenter/pkg/operator/injection"
@@ -45,17 +43,7 @@ func NewController(instanceTypeProvider *instancetype.DefaultProvider) *Controll
 func (c *Controller) Reconcile(ctx context.Context) (reconciler.Result, error) {
 	ctx = injection.WithControllerName(ctx, "providers.instancetype")
 
-	work := []func(ctx context.Context) error{
-		c.instanceTypeProvider.UpdateInstanceTypes,
-		c.instanceTypeProvider.UpdateInstanceTypeOfferings,
-	}
-	errs := make([]error, len(work))
-	lo.ForEach(work, func(f func(ctx context.Context) error, i int) {
-		if err := f(ctx); err != nil {
-			errs[i] = err
-		}
-	})
-	if err := multierr.Combine(errs...); err != nil {
+	if err := c.instanceTypeProvider.Refresh(ctx); err != nil {
 		return reconciler.Result{}, fmt.Errorf("updating instancetype, %w", err)
 	}
 	return reconciler.Result{RequeueAfter: 12 * time.Hour}, nil

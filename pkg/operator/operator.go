@@ -136,11 +136,8 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		pricingProvider.OnDemandPrice,
 	)
 
-	if err := instanceTypeProvider.UpdateInstanceTypes(ctx); err != nil {
-		logger.Error(err, "failed to preload instance types")
-	}
-	if err := instanceTypeProvider.UpdateInstanceTypeOfferings(ctx); err != nil {
-		logger.Error(err, "failed to preload instance type offerings")
+	if err := instanceTypeProvider.Refresh(ctx); err != nil {
+		logger.Error(err, "failed to preload instance types and offerings")
 	}
 	if err := pricingProvider.UpdateOnDemandPricing(ctx, instanceTypeProvider.InstanceTypeInfos()); err != nil {
 		logger.Error(err, "failed to preload on-demand pricing")
