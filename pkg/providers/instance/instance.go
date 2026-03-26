@@ -64,6 +64,7 @@ func NewDefaultProvider(clusterID string, cceapi sdk.CCEAPI, ecsapi sdk.ECSAPI, 
 
 type createCandidate struct {
 	instanceType *cloudprovider.InstanceType
+	price        float64
 	zone         string
 	subnetID     string
 }
@@ -172,12 +173,16 @@ func buildCreateCandidates(instanceTypes []*cloudprovider.InstanceType, reqs sch
 			seen[key] = struct{}{}
 			candidates = append(candidates, createCandidate{
 				instanceType: it,
+				price:        of.Price,
 				zone:         zone,
 				subnetID:     zSubnet.ID,
 			})
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].price != candidates[j].price {
+			return candidates[i].price < candidates[j].price
+		}
 		if candidates[i].zone != candidates[j].zone {
 			return candidates[i].zone < candidates[j].zone
 		}
