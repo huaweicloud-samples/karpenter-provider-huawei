@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/sdkerr"
 	cceMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cce/v3/model"
 	cms "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cms/v1/model"
 	vpcMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/model"
@@ -262,6 +263,49 @@ func TestToCCETaints_ExcludesKarpenterUnregisteredTaint(t *testing.T) {
 	}
 	if _, ok := keys[karpv1.UnregisteredTaintKey+"/NoExecute"]; ok {
 		t.Fatalf("expected karpenter unregistered taint to be filtered, got %#v", *got)
+	}
+}
+
+func TestIsInsufficientCapacityError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "KnownCCEFlavorInsufficientErrorCodeIgnoresStatusCode",
+			err: &sdkerr.ServiceResponseError{
+				StatusCode:   418,
+				ErrorCode:    "CCE_CM.0021",
+				ErrorMessage: "[as7.xlarge.2|ap-southeast-3a] flavor is " + insufficientInSpecifiedAZMessage,
+			},
+			want: true,
+		},
+		{
+			name: "FallbackEnglishInsufficientMessageWithoutCodeIgnoresStatusCode",
+			err: &sdkerr.ServiceResponseError{
+				StatusCode:   418,
+				ErrorMessage: "flavor is " + insufficientInSpecifiedAZMessage,
+			},
+			want: true,
+		},
+		{
+			name: "QuotaErrorIsNotInventoryShortage",
+			err: &sdkerr.ServiceResponseError{
+				StatusCode:   400,
+				ErrorCode:    "CCE_CM.0099",
+				ErrorMessage: "quota exceeded",
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isInsufficientCapacityError(tt.err); got != tt.want {
+				t.Fatalf("expected insufficient=%v, got %v for err=%v", tt.want, got, tt.err)
+			}
+		})
 	}
 }
 
