@@ -97,9 +97,6 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	credentialsBuilder := basic.NewCredentialsBuilder().
 		WithAk(ak).
 		WithSk(sk)
-	if projectID := os.Getenv("HUAWEICLOUD_PROJECT_ID"); projectID != "" {
-		credentialsBuilder.WithProjectId(projectID)
-	}
 	credentials, err := credentialsBuilder.SafeBuild()
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get credentials"))
