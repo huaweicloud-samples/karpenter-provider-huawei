@@ -138,7 +138,6 @@ func TestList_MatchesIDOnly(t *testing.T) {
 	p := newTestProviderWithVPC(vpcapi)
 	nodeClass := &v1alpha1.ECSNodeClass{
 		Spec: v1alpha1.ECSNodeClassSpec{
-			VpcID: "123e4567-e89b-12d3-a456-426614174000",
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
 				{ID: "subnet-123"},
 			},
@@ -150,8 +149,11 @@ func TestList_MatchesIDOnly(t *testing.T) {
 		t.Fatalf("List() error = %v", err)
 	}
 	assertSubnetIDs(t, got, "subnet-123")
-	if vpcapi.lastListSubnetsRequest == nil || vpcapi.lastListSubnetsRequest.VpcId == nil || *vpcapi.lastListSubnetsRequest.VpcId != nodeClass.Spec.VpcID {
-		t.Fatalf("expected ListSubnetsRequest.VpcId=%q, got %#v", nodeClass.Spec.VpcID, vpcapi.lastListSubnetsRequest)
+	if vpcapi.lastListSubnetsRequest == nil {
+		t.Fatalf("expected ListSubnets request to be recorded")
+	}
+	if vpcapi.lastListSubnetsRequest.VpcId != nil {
+		t.Fatalf("expected ListSubnetsRequest.VpcId to be nil, got %#v", vpcapi.lastListSubnetsRequest)
 	}
 }
 
@@ -167,7 +169,6 @@ func TestList_MatchesNameOnly(t *testing.T) {
 	p := newTestProviderWithVPC(vpcapi)
 	nodeClass := &v1alpha1.ECSNodeClass{
 		Spec: v1alpha1.ECSNodeClassSpec{
-			VpcID: "123e4567-e89b-12d3-a456-426614174000",
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
 				{Name: "subnet-b"},
 			},
@@ -193,7 +194,6 @@ func TestList_MatchesIDAndName(t *testing.T) {
 	p := newTestProviderWithVPC(vpcapi)
 	nodeClass := &v1alpha1.ECSNodeClass{
 		Spec: v1alpha1.ECSNodeClassSpec{
-			VpcID: "123e4567-e89b-12d3-a456-426614174000",
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
 				{ID: "subnet-123", Name: "subnet-a"},
 			},
@@ -218,7 +218,6 @@ func TestList_MatchesIDAndNameRequiresBoth(t *testing.T) {
 	p := newTestProviderWithVPC(vpcapi)
 	nodeClass := &v1alpha1.ECSNodeClass{
 		Spec: v1alpha1.ECSNodeClassSpec{
-			VpcID: "123e4567-e89b-12d3-a456-426614174000",
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
 				{ID: "subnet-123", Name: "subnet-a"},
 			},
@@ -244,7 +243,6 @@ func TestList_MatchesMultipleTermsOR(t *testing.T) {
 	p := newTestProviderWithVPC(vpcapi)
 	nodeClass := &v1alpha1.ECSNodeClass{
 		Spec: v1alpha1.ECSNodeClassSpec{
-			VpcID: "123e4567-e89b-12d3-a456-426614174000",
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
 				{ID: "subnet-123"},
 				{Name: "subnet-b"},
@@ -270,7 +268,6 @@ func TestList_DedupesWhenMultipleTermsMatchSameSubnet(t *testing.T) {
 	p := newTestProviderWithVPC(vpcapi)
 	nodeClass := &v1alpha1.ECSNodeClass{
 		Spec: v1alpha1.ECSNodeClassSpec{
-			VpcID: "123e4567-e89b-12d3-a456-426614174000",
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
 				{ID: "subnet-123"},
 				{Name: "subnet-a"},

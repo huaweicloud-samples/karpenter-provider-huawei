@@ -6,7 +6,6 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: ecsnodeclass-sample
 spec:
-  vpcId: 123e4567-e89b-12d3-a456-426614174000
   hmiSelectorTerms:
     - alias: Huawei Cloud EulerOS 2.0
   rootVolume:
