@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/sdkerr"
 	cceMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cce/v3/model"
 	cms "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cms/v1/model"
 	vpcMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/model"
@@ -138,6 +139,51 @@ func TestBuildCreateCandidates_SortedStable(t *testing.T) {
 	}
 }
 
+func TestBuildCreateCandidates_PrefersLowerPrice(t *testing.T) {
+	onDemandReqs := scheduling.NewRequirements(
+		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+	)
+
+	newOffering := func(zone string, price float64) *cloudprovider.Offering {
+		return &cloudprovider.Offering{
+			Available: true,
+			Price:     price,
+			Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
+			),
+		}
+	}
+
+	ac7 := &cloudprovider.InstanceType{
+		Name: "ac7.2xlarge.1",
+		Offerings: cloudprovider.Offerings{
+			newOffering("zone-a", 1.8402),
+		},
+	}
+	x1 := &cloudprovider.InstanceType{
+		Name: "x1.6u.10g",
+		Offerings: cloudprovider.Offerings{
+			newOffering("zone-a", 1.4951),
+		},
+	}
+
+	zonalSubnets := map[string]*subnet.Subnet{
+		"zone-a": {ID: "subnet-a", Zone: "zone-a", AvailableIPAddressCount: 100},
+	}
+
+	candidates := buildCreateCandidates([]*cloudprovider.InstanceType{ac7, x1}, onDemandReqs, zonalSubnets)
+	if len(candidates) != 2 {
+		t.Fatalf("expected 2 candidates, got %d", len(candidates))
+	}
+	if candidates[0].instanceType.Name != "x1.6u.10g" {
+		t.Fatalf("expected cheaper instance type first, got %q", candidates[0].instanceType.Name)
+	}
+	if candidates[1].instanceType.Name != "ac7.2xlarge.1" {
+		t.Fatalf("expected more expensive instance type second, got %q", candidates[1].instanceType.Name)
+	}
+}
+
 func TestNodeSpecForCandidate_AddsDefaultDataVolume(t *testing.T) {
 	rootSize := int32(50)
 	rootType := "GPSSD"
@@ -220,16 +266,61 @@ func TestToCCETaints_ExcludesKarpenterUnregisteredTaint(t *testing.T) {
 	}
 }
 
+func TestIsInsufficientCapacityError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "KnownCCEFlavorInsufficientErrorCodeIgnoresStatusCode",
+			err: &sdkerr.ServiceResponseError{
+				StatusCode:   418,
+				ErrorCode:    "CCE_CM.0021",
+				ErrorMessage: "[as7.xlarge.2|ap-southeast-3a] flavor is " + insufficientInSpecifiedAZMessage,
+			},
+			want: true,
+		},
+		{
+			name: "FallbackEnglishInsufficientMessageWithoutCodeIgnoresStatusCode",
+			err: &sdkerr.ServiceResponseError{
+				StatusCode:   418,
+				ErrorMessage: "flavor is " + insufficientInSpecifiedAZMessage,
+			},
+			want: true,
+		},
+		{
+			name: "QuotaErrorIsNotInventoryShortage",
+			err: &sdkerr.ServiceResponseError{
+				StatusCode:   400,
+				ErrorCode:    "CCE_CM.0099",
+				ErrorMessage: "quota exceeded",
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isInsufficientCapacityError(tt.err); got != tt.want {
+				t.Fatalf("expected insufficient=%v, got %v for err=%v", tt.want, got, tt.err)
+			}
+		})
+	}
+}
+
 type stubCCEAPI struct {
 	createNodeResp *cceMdl.CreateNodeResponse
 	createNodeErr  error
+	createNodeReqs []*cceMdl.CreateNodeRequest
 }
 
 func (s *stubCCEAPI) ShowCluster(*cceMdl.ShowClusterRequest) (*cceMdl.ShowClusterResponse, error) {
 	return nil, nil
 }
 
-func (s *stubCCEAPI) CreateNode(*cceMdl.CreateNodeRequest) (*cceMdl.CreateNodeResponse, error) {
+func (s *stubCCEAPI) CreateNode(req *cceMdl.CreateNodeRequest) (*cceMdl.CreateNodeResponse, error) {
+	s.createNodeReqs = append(s.createNodeReqs, req)
 	return s.createNodeResp, s.createNodeErr
 }
 
@@ -319,5 +410,86 @@ func TestCreate_AllowsEmptyServerIDInCreateNodeResponse(t *testing.T) {
 	}
 	if instance.ServerID != "" {
 		t.Fatalf("expected empty server id, got %q", instance.ServerID)
+	}
+}
+
+func TestCreate_PrefersCheaperCandidate(t *testing.T) {
+	cceapi := &stubCCEAPI{
+		createNodeResp: &cceMdl.CreateNodeResponse{
+			Metadata: &cceMdl.NodeMetadata{Uid: lo.ToPtr("node-123")},
+			Status:   &cceMdl.NodeStatus{},
+		},
+	}
+	provider := &DefaultProvider{
+		clusterID: "cluster-id",
+		cceapi:    cceapi,
+		subnetProvider: &stubSubnetProvider{
+			zonalSubnets: map[string]*subnet.Subnet{
+				"ap-southeast-3a": {ID: "subnet-a", Zone: "ap-southeast-3a", AvailableIPAddressCount: 100},
+			},
+		},
+	}
+	nodeClass := &v1alpha1.ECSNodeClass{
+		Spec: v1alpha1.ECSNodeClassSpec{
+			HMISelectorTerms: []v1alpha1.HMISelectorTerm{{Alias: "Huawei Cloud EulerOS 2.0"}},
+		},
+		Status: v1alpha1.ECSNodeClassStatus{
+			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "ap-southeast-3a"}},
+		},
+	}
+	nodeClaim := &karpv1.NodeClaim{
+		Spec: karpv1.NodeClaimSpec{
+			Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"ac7.2xlarge.1", "x1.6u.10g"},
+					},
+				},
+			},
+		},
+	}
+	instanceTypes := []*cloudprovider.InstanceType{
+		{
+			Name: "ac7.2xlarge.1",
+			Offerings: cloudprovider.Offerings{
+				{
+					Available: true,
+					Price:     1.8402,
+					Requirements: scheduling.NewRequirements(
+						scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "ap-southeast-3a"),
+					),
+				},
+			},
+		},
+		{
+			Name: "x1.6u.10g",
+			Offerings: cloudprovider.Offerings{
+				{
+					Available: true,
+					Price:     1.4951,
+					Requirements: scheduling.NewRequirements(
+						scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "ap-southeast-3a"),
+					),
+				},
+			},
+		},
+	}
+
+	instance, err := provider.Create(context.Background(), nodeClass, nodeClaim, nil, instanceTypes)
+	if err != nil {
+		t.Fatalf("expected create to succeed, got %v", err)
+	}
+	if instance.Flavor != "x1.6u.10g" {
+		t.Fatalf("expected cheaper flavor to be launched, got %q", instance.Flavor)
+	}
+	if len(cceapi.createNodeReqs) != 1 {
+		t.Fatalf("expected exactly one CreateNode call, got %d", len(cceapi.createNodeReqs))
+	}
+	if got := cceapi.createNodeReqs[0].Body.Spec.Flavor; got != "x1.6u.10g" {
+		t.Fatalf("expected CreateNode to request cheaper flavor, got %q", got)
 	}
 }

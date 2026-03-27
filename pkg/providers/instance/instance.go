@@ -38,6 +38,15 @@ import (
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/subnet"
 )
 
+const (
+	cceFlavorInsufficientErrorCode   = "cce_cm.0021"
+	insufficientInSpecifiedAZMessage = "insufficient in specified az"
+	insufficientCapacityMessage      = "insufficient capacity"
+	outOfStockMessage                = "out of stock"
+	soldOutMessage                   = "sold out"
+	sellOutMessage                   = "sell out"
+)
+
 type Provider interface {
 	Create(context.Context, *v1alpha1.ECSNodeClass, *karpv1.NodeClaim, map[string]string, []*cloudprovider.InstanceType) (*Instance, error)
 	Get(context.Context, string) (*Instance, error)
@@ -64,6 +73,7 @@ func NewDefaultProvider(clusterID string, cceapi sdk.CCEAPI, ecsapi sdk.ECSAPI, 
 
 type createCandidate struct {
 	instanceType *cloudprovider.InstanceType
+	price        float64
 	zone         string
 	subnetID     string
 }
@@ -172,12 +182,16 @@ func buildCreateCandidates(instanceTypes []*cloudprovider.InstanceType, reqs sch
 			seen[key] = struct{}{}
 			candidates = append(candidates, createCandidate{
 				instanceType: it,
+				price:        of.Price,
 				zone:         zone,
 				subnetID:     zSubnet.ID,
 			})
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].price != candidates[j].price {
+			return candidates[i].price < candidates[j].price
+		}
 		if candidates[i].zone != candidates[j].zone {
 			return candidates[i].zone < candidates[j].zone
 		}
@@ -433,22 +447,17 @@ func isInsufficientCapacityError(err error) bool {
 	code := strings.ToLower(strings.TrimSpace(serviceErr.ErrorCode))
 	msg := strings.ToLower(strings.TrimSpace(serviceErr.ErrorMessage))
 
-	// Capacity errors are commonly reported as 409/503/500 with service-specific codes/messages.
-	if serviceErr.StatusCode != 409 && serviceErr.StatusCode != 503 && serviceErr.StatusCode != 500 && serviceErr.StatusCode != 400 {
-		return false
+	if code != "" {
+		return code == cceFlavorInsufficientErrorCode
 	}
 	for _, s := range []string{
-		"insufficient",
-		"out of stock",
-		"sold out",
-		"sell out",
-		"capacity",
-		"quota",
-		"资源不足",
-		"库存",
-		"配额",
+		insufficientInSpecifiedAZMessage,
+		insufficientCapacityMessage,
+		outOfStockMessage,
+		soldOutMessage,
+		sellOutMessage,
 	} {
-		if strings.Contains(code, s) || strings.Contains(msg, s) {
+		if strings.Contains(msg, s) {
 			return true
 		}
 	}
