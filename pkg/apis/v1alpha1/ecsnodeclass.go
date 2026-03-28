@@ -62,11 +62,6 @@ type ECSNodeClassSpec struct {
 	// +required
 	HMISelectorTerms []HMISelectorTerm `json:"hmiSelectorTerms" hash:"ignore"`
 
-	// VpcID is the VPC ID used to scope subnet discovery.
-	// +kubebuilder:validation:Pattern="^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-	// +required
-	VpcID string `json:"vpcId" hash:"ignore"`
-
 	// RootVolume is the system disk configuration used for CCE CreateNode.
 	// +required
 	RootVolume RootVolume `json:"rootVolume" hash:"ignore"`

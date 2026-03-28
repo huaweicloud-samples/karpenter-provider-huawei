@@ -50,7 +50,6 @@ var _ = ginkgo.Describe("ECSNodeClass Controller", func() {
 						Name: resourceName,
 					},
 					Spec: karpenterv1alpha1.ECSNodeClassSpec{
-						VpcID: "323e4567-e89b-12d3-a456-426614174000",
 						HMISelectorTerms: []karpenterv1alpha1.HMISelectorTerm{
 							{Alias: "Huawei Cloud EulerOS 2.0"},
 						},

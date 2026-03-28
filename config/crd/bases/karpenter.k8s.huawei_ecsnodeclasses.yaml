@@ -242,15 +242,10 @@ spec:
                   rule: self.size() != 0
                 - message: expected at least one, got none, ['name', 'id']
                   rule: self.all(x, has(x.name) || has(x.id))
-              vpcId:
-                description: VpcID is the VPC ID used to scope subnet discovery.
-                pattern: ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$
-                type: string
             required:
             - hmiSelectorTerms
             - rootVolume
             - subnetSelectorTerms
-            - vpcId
             type: object
           status:
             description: status defines the observed state of ECSNodeClass
