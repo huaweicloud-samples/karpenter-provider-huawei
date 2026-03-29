@@ -310,9 +310,11 @@ func TestIsInsufficientCapacityError(t *testing.T) {
 }
 
 type stubCCEAPI struct {
-	createNodeResp *cceMdl.CreateNodeResponse
-	createNodeErr  error
-	createNodeReqs []*cceMdl.CreateNodeRequest
+	createNodeResp  *cceMdl.CreateNodeResponse
+	createNodeErr   error
+	createNodeReqs  []*cceMdl.CreateNodeRequest
+	createNodeResps []*cceMdl.CreateNodeResponse
+	createNodeErrs  []error
 }
 
 func (s *stubCCEAPI) ShowCluster(*cceMdl.ShowClusterRequest) (*cceMdl.ShowClusterResponse, error) {
@@ -321,6 +323,19 @@ func (s *stubCCEAPI) ShowCluster(*cceMdl.ShowClusterRequest) (*cceMdl.ShowCluste
 
 func (s *stubCCEAPI) CreateNode(req *cceMdl.CreateNodeRequest) (*cceMdl.CreateNodeResponse, error) {
 	s.createNodeReqs = append(s.createNodeReqs, req)
+	if len(s.createNodeResps) > 0 || len(s.createNodeErrs) > 0 {
+		var resp *cceMdl.CreateNodeResponse
+		var err error
+		if len(s.createNodeResps) > 0 {
+			resp = s.createNodeResps[0]
+			s.createNodeResps = s.createNodeResps[1:]
+		}
+		if len(s.createNodeErrs) > 0 {
+			err = s.createNodeErrs[0]
+			s.createNodeErrs = s.createNodeErrs[1:]
+		}
+		return resp, err
+	}
 	return s.createNodeResp, s.createNodeErr
 }
 
@@ -491,5 +506,100 @@ func TestCreate_PrefersCheaperCandidate(t *testing.T) {
 	}
 	if got := cceapi.createNodeReqs[0].Body.Spec.Flavor; got != "x1.6u.10g" {
 		t.Fatalf("expected CreateNode to request cheaper flavor, got %q", got)
+	}
+}
+
+func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T) {
+	cceapi := &stubCCEAPI{
+		createNodeResps: []*cceMdl.CreateNodeResponse{
+			nil,
+			{
+				Metadata: &cceMdl.NodeMetadata{Uid: lo.ToPtr("node-456")},
+				Status:   &cceMdl.NodeStatus{},
+			},
+		},
+		createNodeErrs: []error{
+			&sdkerr.ServiceResponseError{
+				StatusCode:   400,
+				ErrorCode:    "CCE.01400025",
+				ErrorMessage: "Subeni quota is not enough of VM's flavor, Flavor [t7.xlarge.2] 's subeni quota is 0, Eni network is not supported ",
+			},
+			nil,
+		},
+	}
+	provider := &DefaultProvider{
+		clusterID: "cluster-id",
+		cceapi:    cceapi,
+		subnetProvider: &stubSubnetProvider{
+			zonalSubnets: map[string]*subnet.Subnet{
+				"ap-southeast-3a": {ID: "subnet-a", Zone: "ap-southeast-3a", AvailableIPAddressCount: 100},
+			},
+		},
+	}
+	nodeClass := &v1alpha1.ECSNodeClass{
+		Spec: v1alpha1.ECSNodeClassSpec{
+			HMISelectorTerms: []v1alpha1.HMISelectorTerm{{Alias: "Huawei Cloud EulerOS 2.0"}},
+		},
+		Status: v1alpha1.ECSNodeClassStatus{
+			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "ap-southeast-3a"}},
+		},
+	}
+	nodeClaim := &karpv1.NodeClaim{
+		Spec: karpv1.NodeClaimSpec{
+			Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
+				{
+					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
+						Key:      corev1.LabelInstanceTypeStable,
+						Operator: corev1.NodeSelectorOpIn,
+						Values:   []string{"t7.xlarge.2", "t6.xlarge.2"},
+					},
+				},
+			},
+		},
+	}
+	instanceTypes := []*cloudprovider.InstanceType{
+		{
+			Name: "t7.xlarge.2",
+			Offerings: cloudprovider.Offerings{
+				{
+					Available: true,
+					Price:     0.2033,
+					Requirements: scheduling.NewRequirements(
+						scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "ap-southeast-3a"),
+					),
+				},
+			},
+		},
+		{
+			Name: "t6.xlarge.2",
+			Offerings: cloudprovider.Offerings{
+				{
+					Available: true,
+					Price:     0.6876,
+					Requirements: scheduling.NewRequirements(
+						scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+						scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "ap-southeast-3a"),
+					),
+				},
+			},
+		},
+	}
+
+	instance, err := provider.Create(context.Background(), nodeClass, nodeClaim, nil, instanceTypes)
+	if err != nil {
+		t.Fatalf("expected create to succeed after falling back to next candidate, got %v", err)
+	}
+	if instance.Flavor != "t6.xlarge.2" {
+		t.Fatalf("expected fallback flavor %q, got %q", "t6.xlarge.2", instance.Flavor)
+	}
+	if len(cceapi.createNodeReqs) != 2 {
+		t.Fatalf("expected two CreateNode calls, got %d", len(cceapi.createNodeReqs))
+	}
+	if got := cceapi.createNodeReqs[0].Body.Spec.Flavor; got != "t7.xlarge.2" {
+		t.Fatalf("expected first CreateNode to request cheapest flavor, got %q", got)
+	}
+	if got := cceapi.createNodeReqs[1].Body.Spec.Flavor; got != "t6.xlarge.2" {
+		t.Fatalf("expected second CreateNode to request fallback flavor, got %q", got)
 	}
 }
