@@ -40,8 +40,10 @@ import (
 
 const (
 	cceFlavorInsufficientErrorCode   = "cce_cm.0021"
+	cceUnsupportedNetworkErrorCode   = "cce.01400025"
 	insufficientInSpecifiedAZMessage = "insufficient in specified az"
 	insufficientCapacityMessage      = "insufficient capacity"
+	eniNetworkNotSupportedMessage    = "eni network is not supported"
 	outOfStockMessage                = "out of stock"
 	soldOutMessage                   = "sold out"
 	sellOutMessage                   = "sell out"
@@ -123,7 +125,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.ECSNod
 		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("no compatible (instanceType, zone, subnet) candidates"))
 	}
 
-	var lastCapacityErr error
+	var lastUnavailableErr error
 	for _, c := range candidates {
 		resp, err := p.cceapi.CreateNode(&cceMdl.CreateNodeRequest{
 			ClusterId: p.clusterID,
@@ -134,8 +136,8 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.ECSNod
 			},
 		})
 		if err != nil {
-			if isInsufficientCapacityError(err) {
-				lastCapacityErr = err
+			if isInsufficientCapacityError(err) || isUnsupportedNetworkError(err) {
+				lastUnavailableErr = err
 				continue
 			}
 			return nil, err
@@ -155,8 +157,11 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.ECSNod
 		return instance, nil
 	}
 
-	if lastCapacityErr != nil {
-		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("CreateNode failed for all candidates, last error: %w", lastCapacityErr))
+	if lastUnavailableErr != nil {
+		if isInsufficientCapacityError(lastUnavailableErr) {
+			return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("CreateNode failed for all candidates, last error: %w", lastUnavailableErr))
+		}
+		return nil, fmt.Errorf("CreateNode failed for all candidates, last error: %w", lastUnavailableErr)
 	}
 	return nil, fmt.Errorf("CreateNode failed for all candidates")
 }
@@ -462,6 +467,19 @@ func isInsufficientCapacityError(err error) bool {
 		}
 	}
 	return false
+}
+
+func isUnsupportedNetworkError(err error) bool {
+	var serviceErr *sdkerr.ServiceResponseError
+	if !errors.As(err, &serviceErr) {
+		return false
+	}
+	code := strings.ToLower(strings.TrimSpace(serviceErr.ErrorCode))
+	msg := strings.ToLower(strings.TrimSpace(serviceErr.ErrorMessage))
+	if code == cceUnsupportedNetworkErrorCode {
+		return true
+	}
+	return strings.Contains(msg, eniNetworkNotSupportedMessage)
 }
 
 func isNotFoundError(err error) bool {
