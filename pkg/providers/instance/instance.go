@@ -268,19 +268,27 @@ func defaultDataVolumes(volumeType string) *[]cceMdl.Volume {
 
 func toCCETaints(nodeClaim *karpv1.NodeClaim) *[]cceMdl.Taint {
 	var taints []corev1.Taint
+	taints = append(taints, karpv1.UnregisteredNoExecuteTaint)
 	taints = append(taints, nodeClaim.Spec.StartupTaints...)
 	taints = append(taints, nodeClaim.Spec.Taints...)
-	// CCE NodeSpec taints are persistent cluster taints, not one-time kubelet register taints.
-	// Passing karpenter.sh/unregistered here causes CCE to continuously reconcile it back onto
-	// the Node after Karpenter removes it during registration.
+	// CCE manages node.kubernetes.io/network-unavailable internally and rejects CreateNode
+	// requests that try to set it explicitly.
 	taints = lo.Reject(taints, func(t corev1.Taint, _ int) bool {
-		return t.MatchTaint(&karpv1.UnregisteredNoExecuteTaint)
+		return t.MatchTaint(&corev1.Taint{
+			Key:    corev1.TaintNodeNetworkUnavailable,
+			Effect: corev1.TaintEffectNoSchedule,
+		})
 	})
 
 	// Deduplicate by (key,effect)
 	deduped := map[string]corev1.Taint{}
 	for _, t := range taints {
-		deduped[t.Key+"/"+string(t.Effect)] = t
+		key := t.Key + "/" + string(t.Effect)
+		if key == karpv1.UnregisteredTaintKey+"/"+string(corev1.TaintEffectNoExecute) {
+			deduped[key] = karpv1.UnregisteredNoExecuteTaint
+			continue
+		}
+		deduped[key] = t
 	}
 
 	out := make([]cceMdl.Taint, 0, len(deduped))

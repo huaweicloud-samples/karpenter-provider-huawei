@@ -223,7 +223,7 @@ func TestNodeSpecForCandidate_AddsDefaultDataVolume(t *testing.T) {
 	}
 }
 
-func TestToCCETaints_ExcludesKarpenterUnregisteredTaint(t *testing.T) {
+func TestToCCETaints_InjectsKarpenterUnregisteredTaint(t *testing.T) {
 	nodeClaim := &karpv1.NodeClaim{
 		Spec: karpv1.NodeClaimSpec{
 			StartupTaints: []corev1.Taint{
@@ -247,8 +247,8 @@ func TestToCCETaints_ExcludesKarpenterUnregisteredTaint(t *testing.T) {
 	if got == nil {
 		t.Fatalf("expected taints to be returned")
 	}
-	if len(*got) != 2 {
-		t.Fatalf("expected 2 taints after filtering, got %#v", *got)
+	if len(*got) != 3 {
+		t.Fatalf("expected 3 taints after injection, got %#v", *got)
 	}
 
 	keys := map[string]struct{}{}
@@ -261,8 +261,75 @@ func TestToCCETaints_ExcludesKarpenterUnregisteredTaint(t *testing.T) {
 	if _, ok := keys["example.com/dedicated/NoSchedule"]; !ok {
 		t.Fatalf("expected regular taint to be preserved, got %#v", *got)
 	}
-	if _, ok := keys[karpv1.UnregisteredTaintKey+"/NoExecute"]; ok {
-		t.Fatalf("expected karpenter unregistered taint to be filtered, got %#v", *got)
+	if _, ok := keys[karpv1.UnregisteredTaintKey+"/NoExecute"]; !ok {
+		t.Fatalf("expected karpenter unregistered taint to be injected, got %#v", *got)
+	}
+}
+
+func TestToCCETaints_PrefersCanonicalKarpenterUnregisteredTaint(t *testing.T) {
+	nodeClaim := &karpv1.NodeClaim{
+		Spec: karpv1.NodeClaimSpec{
+			StartupTaints: []corev1.Taint{
+				{
+					Key:    karpv1.UnregisteredTaintKey,
+					Value:  "custom",
+					Effect: corev1.TaintEffectNoExecute,
+				},
+			},
+		},
+	}
+
+	got := toCCETaints(nodeClaim)
+	if got == nil {
+		t.Fatalf("expected taints to be returned")
+	}
+	if len(*got) != 1 {
+		t.Fatalf("expected a single deduplicated taint, got %#v", *got)
+	}
+	if (*got)[0].Key != karpv1.UnregisteredTaintKey {
+		t.Fatalf("expected karpenter unregistered taint, got %#v", *got)
+	}
+	if (*got)[0].Effect.Value() != "NoExecute" {
+		t.Fatalf("expected NoExecute effect, got %#v", *got)
+	}
+	if (*got)[0].Value != nil {
+		t.Fatalf("expected canonical unregistered taint to have nil value, got %#v", *got)
+	}
+}
+
+func TestToCCETaints_ExcludesCCENetworkUnavailableTaint(t *testing.T) {
+	nodeClaim := &karpv1.NodeClaim{
+		Spec: karpv1.NodeClaimSpec{
+			StartupTaints: []corev1.Taint{
+				{
+					Key:    corev1.TaintNodeNetworkUnavailable,
+					Effect: corev1.TaintEffectNoSchedule,
+				},
+			},
+			Taints: []corev1.Taint{
+				{
+					Key:    "example.com/dedicated",
+					Effect: corev1.TaintEffectNoSchedule,
+				},
+			},
+		},
+	}
+
+	got := toCCETaints(nodeClaim)
+	if got == nil {
+		t.Fatalf("expected taints to be returned")
+	}
+	if len(*got) != 2 {
+		t.Fatalf("expected CCE-managed network-unavailable taint to be filtered, got %#v", *got)
+	}
+	if hasCCETaint(got, corev1.TaintNodeNetworkUnavailable, "NoSchedule") {
+		t.Fatalf("expected network-unavailable taint to be filtered from CreateNode request, got %#v", *got)
+	}
+	if !hasCCETaint(got, karpv1.UnregisteredTaintKey, "NoExecute") {
+		t.Fatalf("expected karpenter unregistered taint to remain, got %#v", *got)
+	}
+	if !hasCCETaint(got, "example.com/dedicated", "NoSchedule") {
+		t.Fatalf("expected regular taint to remain, got %#v", *got)
 	}
 }
 
@@ -380,14 +447,15 @@ var (
 )
 
 func TestCreate_AllowsEmptyServerIDInCreateNodeResponse(t *testing.T) {
+	cceapi := &stubCCEAPI{
+		createNodeResp: &cceMdl.CreateNodeResponse{
+			Metadata: &cceMdl.NodeMetadata{Uid: lo.ToPtr("node-123")},
+			Status:   &cceMdl.NodeStatus{},
+		},
+	}
 	provider := &DefaultProvider{
 		clusterID: "cluster-id",
-		cceapi: &stubCCEAPI{
-			createNodeResp: &cceMdl.CreateNodeResponse{
-				Metadata: &cceMdl.NodeMetadata{Uid: lo.ToPtr("node-123")},
-				Status:   &cceMdl.NodeStatus{},
-			},
-		},
+		cceapi:    cceapi,
 		subnetProvider: &stubSubnetProvider{
 			zonalSubnets: map[string]*subnet.Subnet{
 				"zone-a": {ID: "subnet-a", Zone: "zone-a", AvailableIPAddressCount: 100},
@@ -425,6 +493,12 @@ func TestCreate_AllowsEmptyServerIDInCreateNodeResponse(t *testing.T) {
 	}
 	if instance.ServerID != "" {
 		t.Fatalf("expected empty server id, got %q", instance.ServerID)
+	}
+	if len(cceapi.createNodeReqs) != 1 {
+		t.Fatalf("expected exactly one CreateNode call, got %d", len(cceapi.createNodeReqs))
+	}
+	if !hasCCETaint(cceapi.createNodeReqs[0].Body.Spec.Taints, karpv1.UnregisteredTaintKey, "NoExecute") {
+		t.Fatalf("expected CreateNode request to include karpenter unregistered taint, got %#v", cceapi.createNodeReqs[0].Body.Spec.Taints)
 	}
 }
 
@@ -506,6 +580,9 @@ func TestCreate_PrefersCheaperCandidate(t *testing.T) {
 	}
 	if got := cceapi.createNodeReqs[0].Body.Spec.Flavor; got != "x1.6u.10g" {
 		t.Fatalf("expected CreateNode to request cheaper flavor, got %q", got)
+	}
+	if !hasCCETaint(cceapi.createNodeReqs[0].Body.Spec.Taints, karpv1.UnregisteredTaintKey, "NoExecute") {
+		t.Fatalf("expected CreateNode request to include karpenter unregistered taint, got %#v", cceapi.createNodeReqs[0].Body.Spec.Taints)
 	}
 }
 
@@ -602,4 +679,16 @@ func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T
 	if got := cceapi.createNodeReqs[1].Body.Spec.Flavor; got != "t6.xlarge.2" {
 		t.Fatalf("expected second CreateNode to request fallback flavor, got %q", got)
 	}
+}
+
+func hasCCETaint(taints *[]cceMdl.Taint, key, effect string) bool {
+	if taints == nil {
+		return false
+	}
+	for _, taint := range *taints {
+		if taint.Key == key && taint.Effect.Value() == effect {
+			return true
+		}
+	}
+	return false
 }
