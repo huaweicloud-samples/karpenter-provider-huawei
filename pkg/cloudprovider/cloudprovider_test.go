@@ -21,20 +21,20 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
-	"sigs.k8s.io/karpenter/pkg/cloudprovider"
-	"sigs.k8s.io/karpenter/pkg/scheduling"
+	karpcloudprovider "sigs.k8s.io/karpenter/pkg/cloudprovider"
+	karpscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 
 	instanceprovider "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/instance"
 )
 
 func TestResolvedNodeClaimLabels_IncludesRestrictedWellKnownLabels(t *testing.T) {
-	instanceType := &cloudprovider.InstanceType{
+	instanceType := &karpcloudprovider.InstanceType{
 		Name: "c9.large.2",
-		Requirements: scheduling.NewRequirements(
-			scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
-			scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, string(corev1.Linux)),
-			scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, "ap-southeast-3"),
-			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "ap-southeast-3a", "ap-southeast-3b"),
+		Requirements: karpscheduling.NewRequirements(
+			karpscheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, "amd64"),
+			karpscheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, string(corev1.Linux)),
+			karpscheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, "ap-southeast-3"),
+			karpscheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "ap-southeast-3a", "ap-southeast-3b"),
 		),
 	}
 	createdInstance := &instanceprovider.Instance{

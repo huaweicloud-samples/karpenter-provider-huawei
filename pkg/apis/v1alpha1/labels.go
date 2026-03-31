@@ -19,6 +19,7 @@ package v1alpha1
 import (
 	corev1 "k8s.io/api/core/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
+	karpscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis"
 )
@@ -51,4 +52,11 @@ func init() {
 		LabelInstanceGPUMemory,
 		corev1.LabelWindowsBuild,
 	)
+	// CCE sets node.kubernetes.io/network-unavailable during node initialization.
+	// Treat it as a known ephemeral taint so the scheduler does not permanently
+	// reject pods onto nodes that are still completing their network setup.
+	karpscheduling.KnownEphemeralTaints = append(karpscheduling.KnownEphemeralTaints, corev1.Taint{
+		Key:    corev1.TaintNodeNetworkUnavailable,
+		Effect: corev1.TaintEffectNoSchedule,
+	})
 }
