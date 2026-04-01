@@ -29,6 +29,7 @@ import (
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/instancetype"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/pricing"
 
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/controllers/nodeclaim/unregisteredtaint"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/controllers/nodeclass"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/subnet"
 
@@ -59,6 +60,7 @@ func NewControllers(
 		nodeclass.NewController(kubeClient, recorder, subnetProvider),
 		controllersinstancetype.NewController(instanceTypeProvider),
 		controllerspricing.NewController(pricingProvider, instanceTypeProvider),
+		unregisteredtaint.NewController(kubeClient),
 	}
 	return controllers
 }
