@@ -147,6 +147,40 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 	cd config/manager && "$(KUSTOMIZE)" edit set image controller=${IMG}
 	"$(KUSTOMIZE)" build config/default > dist/install.yaml
 
+##@ Helm
+
+HELM ?= helm
+HELM_CHART_DIR ?= charts/karpenter-provider-huawei
+HELM_RELEASE_NAME ?= karpenter-provider-huawei
+HELM_NAMESPACE ?= karpenter-provider-huawei-system
+
+.PHONY: helm-lint
+helm-lint: ## Lint the Helm chart.
+	$(HELM) lint $(HELM_CHART_DIR)
+
+.PHONY: helm-template
+helm-template: ## Render Helm chart templates locally.
+	$(HELM) template $(HELM_RELEASE_NAME) $(HELM_CHART_DIR) --namespace $(HELM_NAMESPACE)
+
+.PHONY: helm-install
+helm-install: ## Install the Helm chart to the K8s cluster.
+	$(HELM) install $(HELM_RELEASE_NAME) $(HELM_CHART_DIR) \
+		--namespace $(HELM_NAMESPACE) \
+		--set image.repository=$(shell echo ${IMG} | sed 's/:[^:]*$$//') \
+		--set image.tag=$(shell echo ${IMG} | sed 's/.*://') \
+		--create-namespace
+
+.PHONY: helm-upgrade
+helm-upgrade: ## Upgrade the Helm chart on the K8s cluster.
+	$(HELM) upgrade $(HELM_RELEASE_NAME) $(HELM_CHART_DIR) \
+		--namespace $(HELM_NAMESPACE) \
+		--set image.repository=$(shell echo ${IMG} | sed 's/:[^:]*$$//') \
+		--set image.tag=$(shell echo ${IMG} | sed 's/.*://')
+
+.PHONY: helm-uninstall
+helm-uninstall: ## Uninstall the Helm chart from the K8s cluster.
+	$(HELM) uninstall $(HELM_RELEASE_NAME) --namespace $(HELM_NAMESPACE)
+
 ##@ Deployment
 
 ifndef ignore-not-found
