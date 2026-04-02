@@ -7,8 +7,8 @@ replicaCount: 1
 image:
   # -- Controller image repository
   repository: swr.ap-southeast-3.myhuaweicloud.com/huaweiclouddeveloper/cce/karpenter/controller
-  # -- Controller image tag (defaults to appVersion)
-  tag: ""
+  # -- Controller image tag
+  tag: "latest"
   # -- Image pull policy
   pullPolicy: IfNotPresent
 

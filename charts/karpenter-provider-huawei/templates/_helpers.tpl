@@ -34,7 +34,7 @@ app.kubernetes.io/name: karpenter-provider-huawei
 Controller image
 */}}
 {{- define "karpenter-provider-huawei.controllerImage" -}}
-{{- $tag := default .Chart.AppVersion .Values.image.tag -}}
+{{- $tag := default "latest" .Values.image.tag -}}
 {{- printf "%s:%s" .Values.image.repository $tag -}}
 {{- end }}
 

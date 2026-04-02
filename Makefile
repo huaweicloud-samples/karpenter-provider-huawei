@@ -164,18 +164,28 @@ helm-template: ## Render Helm chart templates locally.
 
 .PHONY: helm-install
 helm-install: ## Install the Helm chart to the K8s cluster.
+	@base="$${IMG##*/}"; \
+	case "$$base" in \
+		*:* ) repo="$${IMG%:*}"; tag="$${IMG##*:}" ;; \
+		* ) repo="$$IMG"; tag="latest" ;; \
+	esac; \
 	$(HELM) install $(HELM_RELEASE_NAME) $(HELM_CHART_DIR) \
 		--namespace $(HELM_NAMESPACE) \
-		--set image.repository=$(shell echo ${IMG} | sed 's/:[^:]*$$//') \
-		--set image.tag=$(shell echo ${IMG} | sed 's/.*://') \
+		--set image.repository="$$repo" \
+		--set image.tag="$$tag" \
 		--create-namespace
 
 .PHONY: helm-upgrade
 helm-upgrade: ## Upgrade the Helm chart on the K8s cluster.
+	@base="$${IMG##*/}"; \
+	case "$$base" in \
+		*:* ) repo="$${IMG%:*}"; tag="$${IMG##*:}" ;; \
+		* ) repo="$$IMG"; tag="latest" ;; \
+	esac; \
 	$(HELM) upgrade $(HELM_RELEASE_NAME) $(HELM_CHART_DIR) \
 		--namespace $(HELM_NAMESPACE) \
-		--set image.repository=$(shell echo ${IMG} | sed 's/:[^:]*$$//') \
-		--set image.tag=$(shell echo ${IMG} | sed 's/.*://')
+		--set image.repository="$$repo" \
+		--set image.tag="$$tag"
 
 .PHONY: helm-uninstall
 helm-uninstall: ## Uninstall the Helm chart from the K8s cluster.

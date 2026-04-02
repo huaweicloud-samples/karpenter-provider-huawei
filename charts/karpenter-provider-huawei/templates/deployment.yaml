@@ -43,7 +43,7 @@ spec:
             drop:
             - "ALL"
       - name: manager
-        image: {{ include "karpenter-provider-huawei.controllerImage" . }}
+        image: {{ include "karpenter-provider-huawei.controllerImage" . | quote }}
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         command:
         - /manager
@@ -53,6 +53,11 @@ spec:
         ports:
         - containerPort: {{ .Values.controller.metricsPort }}
           name: http-metrics
+        env:
+        - name: LEADER_ELECTION_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         envFrom:
         - secretRef:
             name: {{ .Values.credentials.existingSecret }}
