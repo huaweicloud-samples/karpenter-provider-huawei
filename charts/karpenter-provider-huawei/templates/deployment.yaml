@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "karpenter-provider-huawei.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "karpenter-provider-huawei.labels" . | nindent 4 }}
+    {{- include "karpenter-provider-huawei.selectorLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "karpenter-provider-huawei.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        {{- include "karpenter-provider-huawei.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+      - name: kube-rbac-proxy
+        image: "{{ .Values.rbacProxy.image.repository }}:{{ .Values.rbacProxy.image.tag }}"
+        imagePullPolicy: {{ .Values.rbacProxy.image.pullPolicy }}
+        args:
+        - --secure-listen-address=0.0.0.0:8443
+        - --upstream=http://127.0.0.1:{{ .Values.controller.metricsPort }}/
+        - --logtostderr=true
+        - --v=0
+        ports:
+        - containerPort: 8443
+          name: https
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 65532
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - "ALL"
+      - name: manager
+        image: {{ include "karpenter-provider-huawei.controllerImage" . | quote }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        command:
+        - /manager
+        args:
+        - --metrics-port={{ .Values.controller.metricsPort }}
+        - --health-probe-port={{ .Values.controller.healthProbePort }}
+        ports:
+        - containerPort: {{ .Values.controller.metricsPort }}
+          name: http-metrics
+        env:
+        - name: LEADER_ELECTION_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        envFrom:
+        - secretRef:
+            name: {{ .Values.credentials.existingSecret }}
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: {{ .Values.controller.healthProbePort }}
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: {{ .Values.controller.healthProbePort }}
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        {{- with .Values.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+      serviceAccountName: {{ include "karpenter-provider-huawei.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 10
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

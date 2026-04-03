@@ -1,0 +1,77 @@
+# Default values for karpenter-provider-huawei
+
+# -- Number of controller replicas
+replicaCount: 1
+
+# Controller image configuration
+image:
+  # -- Controller image repository
+  repository: swr.ap-southeast-3.myhuaweicloud.com/huaweiclouddeveloper/cce/karpenter/controller
+  # -- Controller image tag
+  tag: "latest"
+  # -- Image pull policy
+  pullPolicy: IfNotPresent
+
+# kube-rbac-proxy sidecar configuration
+rbacProxy:
+  image:
+    # -- kube-rbac-proxy image repository
+    repository: quay.io/brancz/kube-rbac-proxy
+    # -- kube-rbac-proxy image tag
+    tag: "v0.16.0"
+    # -- Image pull policy
+    pullPolicy: IfNotPresent
+
+# -- Name prefix for all resources
+namePrefix: "karpenter-provider-huawei-"
+
+serviceAccount:
+  # -- Create ServiceAccount
+  create: true
+  # -- ServiceAccount name
+  name: controller-manager
+
+# Controller arguments
+controller:
+  # -- Metrics port
+  metricsPort: 8080
+  # -- Health probe port
+  healthProbePort: 8081
+
+# -- Existing secret name for Huawei Cloud credentials
+# The secret must contain: HUAWEICLOUD_AK, HUAWEICLOUD_SK, HUAWEICLOUD_REGION, HUAWEICLOUD_CCE_CLUSTER_ID
+credentials:
+  # -- Use existing secret for credentials
+  existingSecret: "huawei-credentials"
+
+# Controller resources
+resources:
+  limits:
+    cpu: 500m
+    memory: 128Mi
+  requests:
+    cpu: 10m
+    memory: 64Mi
+
+# -- Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container security context for manager
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - "ALL"
+
+# -- Node selector for controller pods
+nodeSelector: {}
+
+# -- Tolerations for controller pods
+tolerations: []
+
+# -- Affinity for controller pods
+affinity: {}

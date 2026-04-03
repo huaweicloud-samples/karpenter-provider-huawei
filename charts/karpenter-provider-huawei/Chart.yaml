@@ -1,0 +1,15 @@
+apiVersion: v2
+name: karpenter-provider-huawei
+description: Huawei Cloud provider for Karpenter - Kubernetes Node Autoscaling
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - karpenter
+  - autoscaling
+  - huawei
+  - cloud
+  - kubernetes
+home: https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
+sources:
+  - https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
