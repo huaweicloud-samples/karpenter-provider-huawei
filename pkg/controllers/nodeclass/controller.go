@@ -47,6 +47,23 @@ import (
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/subnet"
 )
 
+// +kubebuilder:rbac:groups=karpenter.k8s.huawei,resources=ecsnodeclasses,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=karpenter.k8s.huawei,resources=ecsnodeclasses/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=karpenter.k8s.huawei,resources=ecsnodeclasses/finalizers,verbs=update
+// +kubebuilder:rbac:groups="",resources=pods;nodes;persistentvolumes;persistentvolumeclaims;replicationcontrollers;namespaces,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=create;patch;delete;update
+// +kubebuilder:rbac:groups="",resources=pods/eviction,verbs=create
+// +kubebuilder:rbac:groups="",resources=pods,verbs=delete
+// +kubebuilder:rbac:groups=apps,resources=daemonsets;deployments;replicasets;statefulsets,verbs=list;watch
+// +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=list;watch
+// +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch
+// +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=storage.k8s.io,resources=storageclasses;csinodes;volumeattachments,verbs=get;list;watch
+// +kubebuilder:rbac:groups=karpenter.sh,resources=nodepools;nodepools/status;nodeclaims;nodeclaims/status;nodeoverlays;nodeoverlays/status,verbs=get;list;watch
+// +kubebuilder:rbac:groups=karpenter.sh,resources=nodeclaims;nodeclaims/status;nodeclaims/finalizers,verbs=create;delete;update;patch
+// +kubebuilder:rbac:groups=karpenter.sh,resources=nodepools;nodepools/status;nodepools/finalizers;nodeoverlays/status,verbs=update;patch
+
 type Controller struct {
 	kubeClient  client.Client
 	recorder    events.Recorder
