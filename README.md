@@ -2,13 +2,14 @@
 
 ## Overview
 
-Karpenter is an open-source node provisioning project built for Kubernetes.
+The CCE Karpenter Provider enables node autoprovisioning using [Karpenter](https://karpenter.sh/) on your CCE cluster.
 Karpenter improves the efficiency and cost of running workloads on Kubernetes clusters by:
 
 * **Watching** for pods that the Kubernetes scheduler has marked as unschedulable
-* **Evaluating** scheduling constraints (resource requests, nodeselectors, affinities, tolerations, and topology spread constraints) requested by the pods
+* **Evaluating** scheduling constraints (resource requests, node selectors, affinities, tolerations, and topology-spread constraints) requested by the pods
 * **Provisioning** nodes that meet the requirements of the pods
-* **Removing** the nodes when the nodes are no longer needed
+* **Removing** the nodes when they are no longer needed
+* **Consolidating** existing nodes onto cheaper nodes with higher utilization per node
 
 ## Known Limitations
 
