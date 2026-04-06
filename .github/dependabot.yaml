@@ -1,0 +1,35 @@
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    ignore:
+      - dependency-name: sigs.k8s.io/karpenter
+    groups:
+      k8s-go-deps:
+        patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+          - "knative.dev/*"
+        exclude-patterns:
+          - "sigs.k8s.io/karpenter"
+      go-deps:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "k8s.io/*"
+          - "sigs.k8s.io/*"
+          - "knative.dev/*"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions-deps:
+        patterns:
+          - "*"
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
