@@ -1,38 +1,231 @@
-# Karpenter Provider Huawei
-
-Huawei Cloud provider for [Karpenter](https://karpenter.sh/) - the Kubernetes Node Autoscaling project.
+[![GitHub License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
 ## Overview
 
-This project implements the Karpenter cloud provider interface for Huawei Cloud, enabling automatic provisioning of Kubernetes nodes on Huawei Cloud infrastructure.
+The CCE Karpenter Provider enables node autoprovisioning using [Karpenter](https://karpenter.sh/) on your CCE cluster.
+Karpenter improves the efficiency and cost of running workloads on Kubernetes clusters by:
+
+* **Watching** for pods that the Kubernetes scheduler has marked as unschedulable
+* **Evaluating** scheduling constraints (resource requests, node selectors, affinities, tolerations, and topology-spread constraints) requested by the pods
+* **Provisioning** nodes that meet the requirements of the pods
+* **Removing** the nodes when they are no longer needed
+* **Consolidating** existing nodes onto cheaper nodes with higher utilization per node
+
+## Known Limitations
+
+This project is at an early **v1alpha1** stage. Please be aware of the following limitations:
+
+- **On-demand only**: Only `on-demand` capacity type is supported. Spot instances are not yet available.
+- **hmiSelectorTerms**: Currently only the **first term** in the list is used (MVP behavior). Multiple terms are accepted by the API but are not evaluated at runtime.
+- **Kubelet configuration**: Only the following fields are consumed at runtime for capacity/overhead calculations: `maxPods`, `podsPerCore`, `kubeReserved`, `systemReserved`, `evictionHard`, `evictionSoft`. Other fields (`clusterDNS`, `evictionSoftGracePeriod`, `evictionMaxPodGracePeriod`, `imageGCHighThresholdPercent`, `imageGCLowThresholdPercent`, `cpuCFSQuota`) are defined in the API schema but are not yet wired to node launch configuration.
+- **Default data disk**: CCE requires a data disk for worker nodes. A **100 GiB data disk** (same type as root volume) is automatically added to every provisioned node. This is not currently configurable.
 
 ## Prerequisites
 
-- Karpenter v1.8+
-- Huawei Cloud CCE cluster
+- A **Huawei Cloud CCE cluster** running Kubernetes **1.26 - 1.34**
+- Huawei Cloud credentials (AK/SK) with permissions for:
+  - **ECS** - Elastic Cloud Server (flavor listing, server tagging)
+  - **CCE** - Cloud Container Engine (node create/delete/list)
+  - **VPC** - Virtual Private Cloud (subnet discovery)
+  - **BSS** - Billing (on-demand pricing queries)
+- [Helm](https://helm.sh/) v3
+
 
 ## Installation
 
-TODO
+### 1. Create Huawei Cloud Credentials Secret
+
+```bash
+kubectl create namespace karpenter-provider-huawei-system
+
+kubectl create secret generic huawei-credentials \
+  --namespace karpenter-provider-huawei-system \
+  --from-literal=HUAWEICLOUD_AK=<your-access-key> \
+  --from-literal=HUAWEICLOUD_SK=<your-secret-key> \
+  --from-literal=HUAWEICLOUD_REGION=<region-id> \
+  --from-literal=HUAWEICLOUD_CCE_CLUSTER_ID=<cce-cluster-id>
+```
+
+### 2. Install via Helm
+
+```bash
+helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
+  --namespace karpenter-provider-huawei-system \
+  --create-namespace
+```
+
+The default controller image is:
+```
+swr.ap-southeast-3.myhuaweicloud.com/huaweiclouddeveloper/cce/karpenter/controller:latest
+```
+
+To use a custom controller image:
+
+```bash
+helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
+  --namespace karpenter-provider-huawei-system \
+  --set image.repository=<your-registry>/controller \
+  --set image.tag=<your-tag> \
+  --create-namespace
+```
+
+## Getting Started
+
+### Step 1: Create an ECSNodeClass
+
+`ECSNodeClass` is a **cluster-scoped** resource that defines Huawei Cloud-specific node configuration:
+
+```yaml
+apiVersion: karpenter.k8s.huawei/v1alpha1
+kind: ECSNodeClass
+metadata:
+  name: default
+spec:
+  subnetSelectorTerms:
+    - id: "<subnet-uuid>"               # Your VPC subnet ID
+  hmiSelectorTerms:
+    - alias: "Huawei Cloud EulerOS 2.0"  # OS
+  rootVolume:
+    size: 40         # System disk size in GB (40-1024, default 40)
+    volumeType: SSD  # SSD, SAS, SATA, ESSD, GPSSD, etc. (default SSD)
+```
+
+After creation, wait for the `SubnetsReady` condition to become `True` before the NodeClass can be used for provisioning:
+
+```bash
+kubectl get ecsnodeclass default -o jsonpath='{.status.conditions}'
+```
+
+### Step 2: Create a NodePool
+
+Create a Karpenter `NodePool` that references your `ECSNodeClass`:
+
+```yaml
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: default
+spec:
+  template:
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.huawei
+        kind: ECSNodeClass
+        name: default
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 1m
+```
+
+### Step 3: Deploy a Workload
+
+Deploy a workload with resource requests. Karpenter will automatically provision right-sized nodes:
+
+```bash
+kubectl apply -f - <<EOF
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inflate
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: inflate
+  template:
+    metadata:
+      labels:
+        app: inflate
+    spec:
+      containers:
+        - name: inflate
+          image: nginx:latest
+          resources:
+            requests:
+              cpu: "1"
+              memory: 1Gi
+EOF
+```
 
 ## Development
 
-TODO
+### Prerequisites
 
-### Project Structure
+- [Go](https://go.dev/) 1.25+
+- [Docker](https://www.docker.com/) (or Podman)
+- [kubectl](https://kubernetes.io/docs/tasks/tools/)
+- [Helm](https://helm.sh/) v3
+- [Kind](https://kind.sigs.k8s.io/) (for e2e tests)
 
+### Build
+
+```bash
+make build                                              # Build controller binary
+make docker-build IMG=<your-registry>/controller:<tag>  # Build Docker image
+make docker-push IMG=<your-registry>/controller:<tag>   # Push Docker image
+make docker-buildx IMG=<your-registry>/controller:<tag> # Cross-platform build
 ```
-├── cmd/
-│   └── controller/          # Main entry point
-├── pkg/
-│   ├── apis/                # CRD definitions (ECSNodeClass)
-│   ├── controllers/         # Kubernetes controllers
-│   ├── providers/           # Cloud provider implementations
-│   │   ├── instance/        # Instance lifecycle management
-│   │   ├── instancetype/    # Instance type discovery
-│   │   ├── pricing/         # Pricing information
-│   │   └── securitygroup/   # Security group management
-│   └── cloudprovider/       # Karpenter CloudProvider interface
-├── hack/                    # Build and utility scripts
-└── Makefile
+
+### Test
+
+```bash
+make test      # Unit tests
+make test-e2e  # E2E tests (uses Kind)
 ```
+
+### Lint
+
+```bash
+make lint      # Run golangci-lint
+make lint-fix  # Run with auto-fix
+```
+
+### Code Generation
+
+```bash
+make manifests  # Generate CRD manifests
+make generate   # Generate DeepCopy methods
+```
+
+### Helm
+
+```bash
+make helm-lint       # Lint the chart
+make helm-template   # Render templates locally
+make helm-install    # Install
+make helm-upgrade    # Upgrade
+make helm-uninstall  # Uninstall
+```
+
+## Roadmap
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for the project roadmap and progress.
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit issues and pull requests.
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Make your changes and ensure tests pass (`make test && make lint`)
+4. Submit a Pull Request following the [PR template](.github/PULL_REQUEST_TEMPLATE.md)
+
+## Community
+
+- **Issues**: [GitHub Issues](https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/issues)
+- **Karpenter Upstream**: [karpenter.sh](https://karpenter.sh/) | [Karpenter GitHub](https://github.com/kubernetes-sigs/karpenter)
+
+## Code of Conduct
+
+This project follows the [CNCF Community Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
+
+## License
+
+This project is licensed under the [Apache License 2.0](LICENSE).
