@@ -83,6 +83,53 @@ func TestNodeIDFromProviderID(t *testing.T) {
 	}
 }
 
+func TestInstanceFromCCENodeParts_PopulatesSubnetID(t *testing.T) {
+	instance := instanceFromCCENodeParts(
+		&cceMdl.NodeMetadata{Uid: lo.ToPtr("node-123")},
+		&cceMdl.NodeSpec{
+			Flavor: "c9.large.2",
+			Az:     "ap-southeast-3a",
+			NodeNicSpec: &cceMdl.NodeNicSpec{
+				PrimaryNic: &cceMdl.NicSpec{
+					SubnetId: lo.ToPtr("subnet-123"),
+				},
+			},
+		},
+		&cceMdl.NodeStatus{ServerId: lo.ToPtr("server-123")},
+	)
+
+	if instance == nil {
+		t.Fatalf("expected instance to be returned")
+	}
+	if instance.NodeID != "node-123" {
+		t.Fatalf("expected node id %q, got %q", "node-123", instance.NodeID)
+	}
+	if instance.ServerID != "server-123" {
+		t.Fatalf("expected server id %q, got %q", "server-123", instance.ServerID)
+	}
+	if instance.SubnetID != "subnet-123" {
+		t.Fatalf("expected subnet id %q, got %q", "subnet-123", instance.SubnetID)
+	}
+}
+
+func TestInstanceFromCCENodeParts_HandlesMissingNodeNicSpec(t *testing.T) {
+	instance := instanceFromCCENodeParts(
+		&cceMdl.NodeMetadata{Uid: lo.ToPtr("node-123")},
+		&cceMdl.NodeSpec{
+			Flavor: "c9.large.2",
+			Az:     "ap-southeast-3a",
+		},
+		nil,
+	)
+
+	if instance == nil {
+		t.Fatalf("expected instance to be returned")
+	}
+	if instance.SubnetID != "" {
+		t.Fatalf("expected empty subnet id when node nic spec is missing, got %q", instance.SubnetID)
+	}
+}
+
 func TestBuildCreateCandidates_SortedStable(t *testing.T) {
 	onDemandReqs := scheduling.NewRequirements(
 		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),

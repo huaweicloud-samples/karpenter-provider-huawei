@@ -20,10 +20,12 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	karpcloudprovider "sigs.k8s.io/karpenter/pkg/cloudprovider"
 	karpscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
 	instanceprovider "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/instance"
 )
 
@@ -61,5 +63,67 @@ func TestResolvedNodeClaimLabels_IncludesRestrictedWellKnownLabels(t *testing.T)
 	}
 	if got := labels[corev1.LabelTopologyRegion]; got != "ap-southeast-3" {
 		t.Fatalf("expected region label %q, got %q", "ap-southeast-3", got)
+	}
+}
+
+func TestAreStaticFieldsDrifted_ReturnsNodeClassDriftWhenHashesDiffer(t *testing.T) {
+	provider := &CloudProvider{}
+	nodeClaim := &karpv1.NodeClaim{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				v1alpha1.AnnotationECSNodeClassHash:        "hash-a",
+				v1alpha1.AnnotationECSNodeClassHashVersion: "v1",
+			},
+		},
+	}
+	nodeClass := &v1alpha1.ECSNodeClass{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{
+				v1alpha1.AnnotationECSNodeClassHash:        "hash-b",
+				v1alpha1.AnnotationECSNodeClassHashVersion: "v1",
+			},
+		},
+	}
+
+	if got := provider.areStaticFieldsDrifted(nodeClaim, nodeClass); got != NodeClassDrift {
+		t.Fatalf("expected drift reason %q, got %q", NodeClassDrift, got)
+	}
+}
+
+func TestIsSubnetDrifted_ReturnsExpectedDriftReason(t *testing.T) {
+	provider := &CloudProvider{}
+	nodeClass := &v1alpha1.ECSNodeClass{
+		Status: v1alpha1.ECSNodeClassStatus{
+			Subnets: []v1alpha1.Subnet{{ID: "subnet-123"}},
+		},
+	}
+
+	testCases := []struct {
+		name     string
+		subnetID string
+		want     karpcloudprovider.DriftReason
+	}{
+		{
+			name:     "matching subnet",
+			subnetID: "subnet-123",
+			want:     "",
+		},
+		{
+			name:     "missing subnet",
+			subnetID: "subnet-456",
+			want:     SubnetDrift,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := provider.isSubnetDrifted(&instanceprovider.Instance{SubnetID: tc.subnetID}, nodeClass)
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("expected drift reason %q, got %q", tc.want, got)
+			}
+		})
 	}
 }
