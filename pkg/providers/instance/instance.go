@@ -152,7 +152,6 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.ECSNod
 		}
 		if resp.Status != nil {
 			instance.ServerID = lo.FromPtrOr(resp.Status.ServerId, "")
-			instance.JobID = lo.FromPtrOr(resp.Status.JobID, "")
 		}
 		return instance, nil
 	}
@@ -420,12 +419,12 @@ func instanceFromCCENodeParts(metadata *cceMdl.NodeMetadata, spec *cceMdl.NodeSp
 	if status != nil && status.ServerId != nil {
 		out.ServerID = lo.FromPtr(status.ServerId)
 	}
-	if status != nil && status.JobID != nil {
-		out.JobID = lo.FromPtr(status.JobID)
-	}
 	if spec != nil {
 		out.Flavor = spec.Flavor
 		out.Zone = spec.Az
+		if spec.NodeNicSpec != nil && spec.NodeNicSpec.PrimaryNic != nil && spec.NodeNicSpec.PrimaryNic.SubnetId != nil {
+			out.SubnetID = lo.FromPtr(spec.NodeNicSpec.PrimaryNic.SubnetId)
+		}
 	}
 	return out
 }

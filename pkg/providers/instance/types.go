@@ -25,6 +25,6 @@ type Instance struct {
 	Flavor string
 	// Zone is the availability zone of the node.
 	Zone string
-	// JobID is the CCE async job ID, when present.
-	JobID string
+	// SubnetID is the SubnetID of the node.
+	SubnetID string
 }
