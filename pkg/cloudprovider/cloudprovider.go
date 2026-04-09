@@ -129,8 +129,10 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 		ObjectMeta: metav1.ObjectMeta{
 			Labels: resolvedNodeClaimLabels(instanceType, createdInstance),
 			Annotations: map[string]string{
-				v1alpha1.AnnotationNodeID:     createdInstance.NodeID,
-				v1alpha1.AnnotationInstanceID: createdInstance.ServerID,
+				v1alpha1.AnnotationNodeID:                  createdInstance.NodeID,
+				v1alpha1.AnnotationInstanceID:              createdInstance.ServerID,
+				v1alpha1.AnnotationECSNodeClassHash:        nodeClass.Hash(),
+				v1alpha1.AnnotationECSNodeClassHashVersion: v1alpha1.ECSNodeClassHashVersion,
 			},
 		},
 		Status: karpv1.NodeClaimStatus{
