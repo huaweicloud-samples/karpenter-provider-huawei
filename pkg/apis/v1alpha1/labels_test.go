@@ -1,4 +1,20 @@
-package cloudprovider
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package v1alpha1
 
 import (
 	"strings"
@@ -13,20 +29,23 @@ import (
 	karpscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 )
 
+func TestKnownEphemeralTaints_ContainsCCENetworkUnavailable(t *testing.T) {
+	if !containsTaint(karpscheduling.KnownEphemeralTaints, cceNetworkUnavailableTaint()) {
+		t.Fatalf("expected KnownEphemeralTaints to contain %q", corev1.TaintNodeNetworkUnavailable)
+	}
+}
+
 func TestManagedUninitializedNodeTreatsNetworkUnavailableAsKnownEphemeralTaint(t *testing.T) {
 	originalKnownEphemeralTaints := append([]corev1.Taint(nil), karpscheduling.KnownEphemeralTaints...)
 	t.Cleanup(func() {
 		karpscheduling.KnownEphemeralTaints = originalKnownEphemeralTaints
 	})
 
-	networkUnavailableTaint := corev1.Taint{
-		Key:    corev1.TaintNodeNetworkUnavailable,
-		Effect: corev1.TaintEffectNoSchedule,
-	}
 	withoutNetworkUnavailable := make([]corev1.Taint, 0, len(originalKnownEphemeralTaints))
-	for _, t := range originalKnownEphemeralTaints {
-		if !t.MatchTaint(&networkUnavailableTaint) {
-			withoutNetworkUnavailable = append(withoutNetworkUnavailable, t)
+	networkUnavailableTaint := cceNetworkUnavailableTaint()
+	for _, taint := range originalKnownEphemeralTaints {
+		if !taint.MatchTaint(&networkUnavailableTaint) {
+			withoutNetworkUnavailable = append(withoutNetworkUnavailable, taint)
 		}
 	}
 
@@ -62,10 +81,7 @@ func TestManagedUninitializedNodeTreatsNetworkUnavailableAsKnownEphemeralTaint(t
 		{
 			name: "with cce ephemeral taint registration",
 			prepare: func() {
-				karpscheduling.KnownEphemeralTaints = append(withoutNetworkUnavailable, corev1.Taint{
-					Key:    corev1.TaintNodeNetworkUnavailable,
-					Effect: corev1.TaintEffectNoSchedule,
-				})
+				karpscheduling.KnownEphemeralTaints = append(withoutNetworkUnavailable, cceNetworkUnavailableTaint())
 			},
 			wantErr: false,
 		},
@@ -106,6 +122,22 @@ func TestManagedUninitializedNodeTreatsNetworkUnavailableAsKnownEphemeralTaint(t
 	}
 }
 
+func containsTaint(taints []corev1.Taint, want corev1.Taint) bool {
+	for _, taint := range taints {
+		if taint.MatchTaint(&want) {
+			return true
+		}
+	}
+	return false
+}
+
+func cceNetworkUnavailableTaint() corev1.Taint {
+	return corev1.Taint{
+		Key:    corev1.TaintNodeNetworkUnavailable,
+		Effect: corev1.TaintEffectNoSchedule,
+	}
+}
+
 func newManagedUninitializedStateNode() *karpstate.StateNode {
 	allocatable := corev1.ResourceList{
 		corev1.ResourceCPU:    resource.MustParse("2"),
@@ -128,10 +160,7 @@ func newManagedUninitializedStateNode() *karpstate.StateNode {
 			},
 		},
 		Spec: corev1.NodeSpec{
-			Taints: []corev1.Taint{{
-				Key:    corev1.TaintNodeNetworkUnavailable,
-				Effect: corev1.TaintEffectNoSchedule,
-			}},
+			Taints: []corev1.Taint{cceNetworkUnavailableTaint()},
 		},
 		Status: corev1.NodeStatus{
 			Capacity:    allocatable,
