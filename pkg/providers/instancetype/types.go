@@ -179,14 +179,59 @@ func pods(info ecsMdl.Flavor, maxPods *int32, podsPerCore *int32) *resource.Quan
 	case maxPods != nil:
 		count = int64(lo.FromPtr(maxPods))
 	default:
-		count = 110
-
+		count = defaultMaxPods(info)
 	}
 	if lo.FromPtr(podsPerCore) > 0 {
 		vcpus, _ := strconv.Atoi(info.Vcpus)
 		count = lo.Min([]int64{int64(lo.FromPtr(podsPerCore)) * int64(vcpus), count})
 	}
 	return resources.Quantity(fmt.Sprint(count))
+}
+
+func defaultMaxPods(info ecsMdl.Flavor) int64 {
+	count := defaultMaxPodsByMemoryMiB(int64(info.Ram))
+	if info.OsExtraSpecs == nil {
+		return count
+	}
+	// CCE Turbo's default maxPods is additionally capped by the flavor's
+	// supplementary NIC capacity, which matches the observed node pod capacity.
+	if nicCap, ok := parsePositiveInt64(info.OsExtraSpecs.QuotasubNetworkInterfaceMaxNum); ok {
+		return minInt64(count, nicCap)
+	}
+	return count
+}
+
+func defaultMaxPodsByMemoryMiB(memoryMiB int64) int64 {
+	switch {
+	case memoryMiB >= 65536:
+		return 110
+	case memoryMiB >= 32768:
+		return 80
+	case memoryMiB >= 16384:
+		return 60
+	case memoryMiB >= 8192:
+		return 40
+	default:
+		return 20
+	}
+}
+
+func parsePositiveInt64(v *string) (int64, bool) {
+	if v == nil {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(*v), 10, 64)
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+func minInt64(a, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func systemReservedResources(systemReserved map[string]string) corev1.ResourceList {
