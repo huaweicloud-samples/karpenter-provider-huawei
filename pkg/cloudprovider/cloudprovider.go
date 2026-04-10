@@ -19,6 +19,7 @@ package cloudprovider
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/awslabs/operatorpkg/status"
 	"github.com/samber/lo"
@@ -276,8 +277,19 @@ func (c *CloudProvider) IsDrifted(ctx context.Context, nodeClaim *karpv1.NodeCla
 
 // RepairPolicies returns the node repair policies supported by this provider.
 func (c *CloudProvider) RepairPolicies() []cloudprovider.RepairPolicy {
-	//TODO implement me
-	return nil
+	return []cloudprovider.RepairPolicy{
+		// Supported Kubelet Node Conditions
+		{
+			ConditionType:      corev1.NodeReady,
+			ConditionStatus:    corev1.ConditionFalse,
+			TolerationDuration: 30 * time.Minute,
+		},
+		{
+			ConditionType:      corev1.NodeReady,
+			ConditionStatus:    corev1.ConditionUnknown,
+			TolerationDuration: 30 * time.Minute,
+		},
+	}
 }
 
 // Name returns the provider name.
