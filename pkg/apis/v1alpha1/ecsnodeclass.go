@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mitchellh/hashstructure/v2"
+	"github.com/samber/lo"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -65,6 +67,16 @@ type ECSNodeClassSpec struct {
 	// RootVolume is the system disk configuration used for CCE CreateNode.
 	// +required
 	RootVolume RootVolume `json:"rootVolume" hash:"ignore"`
+}
+
+type normalizedHMISelection struct {
+	Alias string
+	ID    string
+}
+
+type normalizedRootVolume struct {
+	Size       int32
+	VolumeType string
 }
 
 // RootVolume defines the system disk configuration for nodes created via CCE.
@@ -126,6 +138,31 @@ func (s *ECSNodeClassSpec) ResolveHMIForCreateNode() (osAlias string, nodeImageI
 	return osAlias, nodeImageID, nil
 }
 
+func (s *ECSNodeClassSpec) normalizedHMISelection() normalizedHMISelection {
+	if s == nil || len(s.HMISelectorTerms) == 0 {
+		return normalizedHMISelection{}
+	}
+	return normalizedHMISelection{
+		Alias: strings.TrimSpace(s.HMISelectorTerms[0].Alias),
+		ID:    strings.TrimSpace(s.HMISelectorTerms[0].ID),
+	}
+}
+
+func (r RootVolume) normalized() normalizedRootVolume {
+	size := int32(40)
+	if r.Size != nil && *r.Size > 0 {
+		size = *r.Size
+	}
+	volumeType := "SSD"
+	if r.VolumeType != nil && strings.TrimSpace(*r.VolumeType) != "" {
+		volumeType = strings.TrimSpace(*r.VolumeType)
+	}
+	return normalizedRootVolume{
+		Size:       size,
+		VolumeType: volumeType,
+	}
+}
+
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:subresource:status
@@ -145,6 +182,28 @@ type ECSNodeClass struct {
 	// status defines the observed state of ECSNodeClass
 	// +optional
 	Status ECSNodeClassStatus `json:"status,omitempty"`
+}
+
+// We need to bump the ECSNodeClassHashVersion when we make an update to the ECSNodeClass CRD under these conditions:
+// 1. A field changes its default value for an existing field that is already hashed
+// 2. A field is added to the hash calculation with an already-set value
+// 3. A field is removed from the hash calculations
+const ECSNodeClassHashVersion = "v1"
+
+func (in *ECSNodeClass) Hash() string {
+	return fmt.Sprint(lo.Must(hashstructure.Hash(struct {
+		Spec                ECSNodeClassSpec
+		EffectiveHMI        normalizedHMISelection
+		EffectiveRootVolume normalizedRootVolume
+	}{
+		Spec:                in.Spec,
+		EffectiveHMI:        in.Spec.normalizedHMISelection(),
+		EffectiveRootVolume: in.Spec.RootVolume.normalized(),
+	}, hashstructure.FormatV2, &hashstructure.HashOptions{
+		SlicesAsSets:    true,
+		IgnoreZeroValue: true,
+		ZeroNil:         true,
+	})))
 }
 
 // +kubebuilder:object:root=true

@@ -17,16 +17,22 @@ limitations under the License.
 package cloudprovider
 
 import (
+	"context"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	karpcloudprovider "sigs.k8s.io/karpenter/pkg/cloudprovider"
 	karpscheduling "sigs.k8s.io/karpenter/pkg/scheduling"
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
+	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
 	instanceprovider "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/instance"
+	instancetypeprovider "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/instancetype"
 )
 
 func TestResolvedNodeClaimLabels_IncludesRestrictedWellKnownLabels(t *testing.T) {
@@ -66,6 +72,47 @@ func TestResolvedNodeClaimLabels_IncludesRestrictedWellKnownLabels(t *testing.T)
 	}
 }
 
+type stubCloudProviderInstanceTypeProvider struct {
+	instanceTypes []*karpcloudprovider.InstanceType
+	err           error
+}
+
+func (s *stubCloudProviderInstanceTypeProvider) Get(context.Context, instancetypeprovider.NodeClass, sdk.InstanceType) (*karpcloudprovider.InstanceType, error) {
+	return nil, nil
+}
+
+func (s *stubCloudProviderInstanceTypeProvider) List(context.Context, instancetypeprovider.NodeClass) ([]*karpcloudprovider.InstanceType, error) {
+	return s.instanceTypes, s.err
+}
+
+type stubCloudProviderInstanceProvider struct {
+	instance *instanceprovider.Instance
+	err      error
+}
+
+func (s *stubCloudProviderInstanceProvider) Create(context.Context, *v1alpha1.ECSNodeClass, *karpv1.NodeClaim, map[string]string, []*karpcloudprovider.InstanceType) (*instanceprovider.Instance, error) {
+	return s.instance, s.err
+}
+
+func (s *stubCloudProviderInstanceProvider) Get(context.Context, string) (*instanceprovider.Instance, error) {
+	return s.instance, s.err
+}
+
+func (s *stubCloudProviderInstanceProvider) List(context.Context) ([]*instanceprovider.Instance, error) {
+	if s.instance == nil {
+		return nil, s.err
+	}
+	return []*instanceprovider.Instance{s.instance}, s.err
+}
+
+func (s *stubCloudProviderInstanceProvider) Delete(context.Context, string) error {
+	return s.err
+}
+
+func (s *stubCloudProviderInstanceProvider) CreateTags(context.Context, string, map[string]string) error {
+	return s.err
+}
+
 func TestAreStaticFieldsDrifted_ReturnsNodeClassDriftWhenHashesDiffer(t *testing.T) {
 	provider := &CloudProvider{}
 	nodeClaim := &karpv1.NodeClaim{
@@ -87,6 +134,71 @@ func TestAreStaticFieldsDrifted_ReturnsNodeClassDriftWhenHashesDiffer(t *testing
 
 	if got := provider.areStaticFieldsDrifted(nodeClaim, nodeClass); got != NodeClassDrift {
 		t.Fatalf("expected drift reason %q, got %q", NodeClassDrift, got)
+	}
+}
+
+func TestCreate_AnnotatesReturnedNodeClaimWithECSNodeClassHash(t *testing.T) {
+	nodeClass := &v1alpha1.ECSNodeClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "default"},
+		Spec: v1alpha1.ECSNodeClassSpec{
+			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{{ID: "123e4567-e89b-12d3-a456-426614174000"}},
+			HMISelectorTerms:    []v1alpha1.HMISelectorTerm{{Alias: " Huawei Cloud EulerOS 2.0 "}},
+		},
+		Status: v1alpha1.ECSNodeClassStatus{
+			Subnets: []v1alpha1.Subnet{{ID: "subnet-123", Zone: "zone-a"}},
+		},
+	}
+	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeSubnetsReady)
+
+	kubeClient := fake.NewClientBuilder().WithScheme(clientgoscheme.Scheme).WithObjects(nodeClass).Build()
+	provider := &CloudProvider{
+		kubeClient: kubeClient,
+		instanceTypeProvider: &stubCloudProviderInstanceTypeProvider{
+			instanceTypes: []*karpcloudprovider.InstanceType{{
+				Name: "c9.large.2",
+				Capacity: corev1.ResourceList{
+					corev1.ResourceCPU: resource.MustParse("2"),
+				},
+				Overhead: &karpcloudprovider.InstanceTypeOverhead{},
+				Requirements: karpscheduling.NewRequirements(
+					karpscheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "zone-a"),
+				),
+			}},
+		},
+		instanceProvider: &stubCloudProviderInstanceProvider{
+			instance: &instanceprovider.Instance{
+				NodeID:   "node-123",
+				ServerID: "server-123",
+				Flavor:   "c9.large.2",
+				Zone:     "zone-a",
+			},
+		},
+	}
+	nodeClaim := &karpv1.NodeClaim{
+		Spec: karpv1.NodeClaimSpec{
+			NodeClassRef: &karpv1.NodeClassReference{
+				Group: "karpenter.k8s.huawei",
+				Kind:  "ECSNodeClass",
+				Name:  "default",
+			},
+		},
+	}
+
+	created, err := provider.Create(context.Background(), nodeClaim)
+	if err != nil {
+		t.Fatalf("expected create to succeed, got %v", err)
+	}
+	if got := created.Annotations[v1alpha1.AnnotationNodeID]; got != "node-123" {
+		t.Fatalf("expected node id annotation %q, got %q", "node-123", got)
+	}
+	if got := created.Annotations[v1alpha1.AnnotationInstanceID]; got != "server-123" {
+		t.Fatalf("expected instance id annotation %q, got %q", "server-123", got)
+	}
+	if got := created.Annotations[v1alpha1.AnnotationECSNodeClassHash]; got != nodeClass.Hash() {
+		t.Fatalf("expected ecsnodeclass hash annotation %q, got %q", nodeClass.Hash(), got)
+	}
+	if got := created.Annotations[v1alpha1.AnnotationECSNodeClassHashVersion]; got != v1alpha1.ECSNodeClassHashVersion {
+		t.Fatalf("expected ecsnodeclass hash version %q, got %q", v1alpha1.ECSNodeClassHashVersion, got)
 	}
 }
 
