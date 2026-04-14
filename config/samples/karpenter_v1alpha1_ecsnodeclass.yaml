@@ -6,10 +6,25 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: ecsnodeclass-sample
 spec:
-  hmiSelectorTerms:
-    - alias: Huawei Cloud EulerOS 2.0
-  rootVolume:
-    size: 40
-    volumeType: SSD
   subnetSelectorTerms:
     - id: 323e4567-e89b-12d3-a456-426614174000
+  imsSelector:
+    imsFamily: HCE OS 2.0
+  blockDeviceMappings:
+    k8s:
+      volumeSize: 120
+      volumeType: SAS
+    root:
+      volumeSize: 120
+      volumeType: SATA
+    users:
+      - volumeSize: 50
+        volumeType: SAS
+      - volumeSize: 50
+        volumeType: SATA
+  runtimeConfiguration:
+    type: containerd
+  login:
+    userPassword:
+      username: root
+      password: "<salted-and-encrypted-password>"

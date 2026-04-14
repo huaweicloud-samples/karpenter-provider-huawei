@@ -19,86 +19,83 @@ package v1alpha1
 import "testing"
 
 func TestECSNodeClassHash(t *testing.T) {
-	rootSize40 := int32(40)
-	rootSize80 := int32(80)
-	volumeTypeSSD := "SSD"
-	volumeTypeGPSSD := "GPSSD"
+	rootIOPS := int32(3000)
+	rootThroughput := int32(125)
+	userVolumeSize := int32(50)
+	ecsGroupID := "46ebaf04-ca42-48ca-8057-0b96e6126e1b"
 
 	base := &ECSNodeClass{
 		Spec: ECSNodeClassSpec{
+			ECSGroupID:          &ecsGroupID,
 			SubnetSelectorTerms: []SubnetSelectorTerm{{ID: "123e4567-e89b-12d3-a456-426614174000"}},
-			HMISelectorTerms:    []HMISelectorTerm{{Alias: "Huawei Cloud EulerOS 2.0"}},
-			RootVolume: RootVolume{
-				Size:       &rootSize40,
-				VolumeType: &volumeTypeSSD,
+			IMSSelector:         IMSSelector{IMSFamily: "HCE OS 2.0"},
+			BlockDeviceMappings: BlockDeviceMappings{
+				K8S: &BlockDevice{
+					VolumeSize: 120,
+					VolumeType: "SAS",
+				},
+				Root: BlockDevice{
+					VolumeSize: 120,
+					VolumeType: "GPSSD2",
+					IOPS:       &rootIOPS,
+					Throughput: &rootThroughput,
+				},
+				Users: []BlockDevice{{
+					VolumeSize: userVolumeSize,
+					VolumeType: "SATA",
+				}},
+			},
+			RuntimeConfiguration: &RuntimeConfiguration{Type: "docker"},
+			Login: Login{
+				UserPassword: UserPassword{
+					Password: "ciphertext",
+				},
 			},
 		},
 	}
 
-	t.Run("root volume size changes hash", func(t *testing.T) {
+	t.Run("root block device changes hash", func(t *testing.T) {
 		other := base.DeepCopy()
-		other.Spec.RootVolume.Size = &rootSize80
+		other.Spec.BlockDeviceMappings.Root.VolumeSize = 160
 
 		if base.Hash() == other.Hash() {
-			t.Fatalf("expected root volume size change to alter hash")
+			t.Fatalf("expected root block device change to alter hash")
 		}
 	})
 
-	t.Run("root volume type changes hash", func(t *testing.T) {
+	t.Run("runtime type changes hash", func(t *testing.T) {
 		other := base.DeepCopy()
-		other.Spec.RootVolume.VolumeType = &volumeTypeGPSSD
+		other.Spec.RuntimeConfiguration.Type = "containerd"
 
 		if base.Hash() == other.Hash() {
-			t.Fatalf("expected root volume type change to alter hash")
+			t.Fatalf("expected runtime type change to alter hash")
 		}
 	})
 
-	t.Run("omitted root volume defaults hash same as explicit defaults", func(t *testing.T) {
+	t.Run("login username default hashes same as explicit root", func(t *testing.T) {
 		other := base.DeepCopy()
-		other.Spec.RootVolume = RootVolume{}
+		other.Spec.Login.UserPassword.Username = "root"
 
 		if base.Hash() != other.Hash() {
-			t.Fatalf("expected omitted root volume to hash same as explicit defaults")
+			t.Fatalf("expected default login username to hash same as explicit root")
 		}
 	})
 
-	t.Run("first hmi selector changes hash", func(t *testing.T) {
+	t.Run("ims family changes hash", func(t *testing.T) {
 		other := base.DeepCopy()
-		other.Spec.HMISelectorTerms[0].Alias = "Huawei Cloud EulerOS 3.0"
+		other.Spec.IMSSelector.IMSFamily = "Ubuntu 22.04"
 
 		if base.Hash() == other.Hash() {
-			t.Fatalf("expected first hmi selector change to alter hash")
+			t.Fatalf("expected ims family change to alter hash")
 		}
 	})
 
-	t.Run("swapping first selected hmi changes hash", func(t *testing.T) {
+	t.Run("user data volume changes hash", func(t *testing.T) {
 		other := base.DeepCopy()
-		other.Spec.HMISelectorTerms = []HMISelectorTerm{
-			{ID: "123e4567-e89b-12d3-a456-426614174999"},
-			{Alias: "Huawei Cloud EulerOS 2.0"},
-		}
-		baseWithTwo := base.DeepCopy()
-		baseWithTwo.Spec.HMISelectorTerms = []HMISelectorTerm{
-			{Alias: "Huawei Cloud EulerOS 2.0"},
-			{ID: "123e4567-e89b-12d3-a456-426614174999"},
-		}
+		other.Spec.BlockDeviceMappings.Users[0].VolumeType = "SAS"
 
-		if baseWithTwo.Hash() == other.Hash() {
-			t.Fatalf("expected swapping selected hmi term to alter hash")
-		}
-	})
-
-	t.Run("changing non selected hmi does not change hash", func(t *testing.T) {
-		withTwo := base.DeepCopy()
-		withTwo.Spec.HMISelectorTerms = []HMISelectorTerm{
-			{Alias: "Huawei Cloud EulerOS 2.0"},
-			{ID: "123e4567-e89b-12d3-a456-426614174999"},
-		}
-		other := withTwo.DeepCopy()
-		other.Spec.HMISelectorTerms[1].ID = "123e4567-e89b-12d3-a456-426614174998"
-
-		if withTwo.Hash() != other.Hash() {
-			t.Fatalf("expected non-selected hmi selector change not to alter hash")
+		if base.Hash() == other.Hash() {
+			t.Fatalf("expected user data volume change to alter hash")
 		}
 	})
 

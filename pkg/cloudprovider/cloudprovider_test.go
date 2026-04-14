@@ -142,7 +142,13 @@ func TestCreate_AnnotatesReturnedNodeClaimWithECSNodeClassHash(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "default"},
 		Spec: v1alpha1.ECSNodeClassSpec{
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{{ID: "123e4567-e89b-12d3-a456-426614174000"}},
-			HMISelectorTerms:    []v1alpha1.HMISelectorTerm{{Alias: " Huawei Cloud EulerOS 2.0 "}},
+			IMSSelector:         v1alpha1.IMSSelector{IMSFamily: " HCE OS 2.0 "},
+			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
+				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
+			},
+			Login: v1alpha1.Login{
+				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
+			},
 		},
 		Status: v1alpha1.ECSNodeClassStatus{
 			Subnets: []v1alpha1.Subnet{{ID: "subnet-123", Zone: "zone-a"}},

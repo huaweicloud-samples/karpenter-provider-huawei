@@ -16,9 +16,8 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 This project is at an early **v1alpha1** stage. Please be aware of the following limitations:
 
 - **On-demand only**: Only `on-demand` capacity type is supported. Spot instances are not yet available.
-- **hmiSelectorTerms**: Currently only the **first term** in the list is used (MVP behavior). Multiple terms are accepted by the API but are not evaluated at runtime.
 - **Kubelet configuration**: Only the following fields are consumed at runtime for capacity/overhead calculations: `maxPods`, `podsPerCore`, `kubeReserved`, `systemReserved`, `evictionHard`, `evictionSoft`. Other fields (`clusterDNS`, `evictionSoftGracePeriod`, `evictionMaxPodGracePeriod`, `imageGCHighThresholdPercent`, `imageGCLowThresholdPercent`, `cpuCFSQuota`) are defined in the API schema but are not yet wired to node launch configuration.
-- **Default data disk**: CCE requires a data disk for worker nodes. A **100 GiB data disk** (same type as root volume) is automatically added to every provisioned node. This is not currently configurable.
+- **Default k8s data disk**: CCE requires a data disk for worker nodes. If `spec.blockDeviceMappings.k8s` is omitted, a **100 GiB data disk** using the same type as `spec.blockDeviceMappings.root` is added automatically.
 
 ## Prerequisites
 
@@ -82,12 +81,25 @@ metadata:
   name: default
 spec:
   subnetSelectorTerms:
-    - id: "<subnet-uuid>"               # Your VPC subnet ID
-  hmiSelectorTerms:
-    - alias: "Huawei Cloud EulerOS 2.0"  # OS
-  rootVolume:
-    size: 40         # System disk size in GB (40-1024, default 40)
-    volumeType: SSD  # SSD, SAS, SATA, ESSD, GPSSD, etc. (default SSD)
+    - id: "<subnet-uuid>"                  # Your VPC subnet ID
+  imsSelector:
+    imsFamily: "HCE OS 2.0"                # OS family
+  blockDeviceMappings:
+    k8s:
+      volumeSize: 120
+      volumeType: SAS
+    root:
+      volumeSize: 120
+      volumeType: SATA
+    users:
+      - volumeSize: 50
+        volumeType: SAS
+  runtimeConfiguration:
+    type: containerd
+  login:
+    userPassword:
+      username: root
+      password: "<salted-and-encrypted-password>"
 ```
 
 After creation, wait for the `SubnetsReady` condition to become `True` before the NodeClass can be used for provisioning:

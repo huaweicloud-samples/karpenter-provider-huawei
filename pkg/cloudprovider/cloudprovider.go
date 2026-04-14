@@ -91,14 +91,11 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 	if !subnetsReady.IsTrue() || len(nodeClass.Status.Subnets) == 0 {
 		return nil, cloudprovider.NewNodeClassNotReadyError(fmt.Errorf("nodeclass subnets not ready: %s", subnetsReady.Message))
 	}
-	osAlias, nodeImageID, err := nodeClass.Spec.ResolveHMIForCreateNode()
+	osAlias, err := nodeClass.Spec.ResolveIMSForCreateNode()
 	if err != nil {
-		return nil, cloudprovider.NewCreateError(fmt.Errorf("resolving nodeclass hmiSelectorTerms, %w", err), "InvalidNodeClass", "Invalid NodeClass hmiSelectorTerms")
+		return nil, cloudprovider.NewCreateError(fmt.Errorf("resolving nodeclass imsSelector, %w", err), "InvalidNodeClass", "Invalid NodeClass imsSelector")
 	}
-	imageID := nodeImageID
-	if imageID == "" {
-		imageID = osAlias
-	}
+	imageID := osAlias
 	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
 	if err != nil {
 		return nil, cloudprovider.NewCreateError(fmt.Errorf("resolving instance types, %w", err), "InstanceTypeResolutionFailed", "Error resolving instance types")

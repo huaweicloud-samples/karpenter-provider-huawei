@@ -84,7 +84,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.ECSNod
 	if p.clusterID == "" {
 		return nil, fmt.Errorf("CCE clusterID is empty")
 	}
-	osAlias, nodeImageID, err := nodeClass.Spec.ResolveHMIForCreateNode()
+	osAlias, err := nodeClass.Spec.ResolveIMSForCreateNode()
 	if err != nil {
 		return nil, err
 	}
@@ -132,7 +132,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.ECSNod
 			Body: &cceMdl.NodeCreateRequest{
 				Kind:       "Node",
 				ApiVersion: "v3",
-				Spec:       p.nodeSpecForCandidate(nodeClass, nodeClaim, tags, c, osAlias, nodeImageID),
+				Spec:       p.nodeSpecForCandidate(nodeClass, nodeClaim, tags, c, osAlias),
 			},
 		})
 		if err != nil {
@@ -204,9 +204,12 @@ func buildCreateCandidates(instanceTypes []*cloudprovider.InstanceType, reqs sch
 	return candidates
 }
 
-func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.ECSNodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, c createCandidate, osAlias, nodeImageID string) *cceMdl.NodeSpec {
-	rootVolumeSize, rootVolumeType := resolveRootVolume(nodeClass)
-	dataVolumes := defaultDataVolumes(rootVolumeType)
+func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.ECSNodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, c createCandidate, osAlias string) *cceMdl.NodeSpec {
+	rootVolume := resolveRootVolume(nodeClass)
+	dataVolumes := resolveDataVolumes(nodeClass, rootVolume.Volumetype)
+	login := resolveLogin(nodeClass)
+	runtime := resolveRuntime(nodeClass)
+	ecsGroupID := resolveECSGroupID(nodeClass)
 
 	k8sTags := map[string]string{}
 	for k, v := range tags {
@@ -220,16 +223,15 @@ func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.ECSNodeClass,
 		os = lo.ToPtr(strings.TrimSpace(osAlias))
 	}
 	spec := &cceMdl.NodeSpec{
-		Flavor: c.instanceType.Name,
-		Az:     c.zone,
-		Os:     os,
-		Count:  lo.ToPtr(int32(1)),
-		RootVolume: &cceMdl.Volume{
-			Size:       rootVolumeSize,
-			Volumetype: rootVolumeType,
-		},
-		// CCE requires a data disk for standard ECS-backed worker nodes.
+		Flavor:      c.instanceType.Name,
+		Az:          c.zone,
+		Os:          os,
+		Count:       lo.ToPtr(int32(1)),
+		RootVolume:  rootVolume,
 		DataVolumes: dataVolumes,
+		Login:       login,
+		Runtime:     runtime,
+		EcsGroupId:  ecsGroupID,
 		OffloadNode: lo.ToPtr(true),
 		NodeNicSpec: &cceMdl.NodeNicSpec{
 			PrimaryNic: &cceMdl.NicSpec{SubnetId: &subnetID},
@@ -237,32 +239,92 @@ func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.ECSNodeClass,
 		Taints:  toCCETaints(nodeClaim),
 		K8sTags: k8sTags,
 	}
-	if strings.TrimSpace(nodeImageID) != "" {
-		spec.ExtendParam = &cceMdl.NodeExtendParam{
-			AlphaCceNodeImageID: lo.ToPtr(strings.TrimSpace(nodeImageID)),
-		}
-	}
 	return spec
 }
 
-func resolveRootVolume(nodeClass *v1alpha1.ECSNodeClass) (int32, string) {
-	size := int32(40)
-	if nodeClass.Spec.RootVolume.Size != nil && *nodeClass.Spec.RootVolume.Size > 0 {
-		size = *nodeClass.Spec.RootVolume.Size
-	}
-	volumeType := "SSD"
-	if nodeClass.Spec.RootVolume.VolumeType != nil && strings.TrimSpace(*nodeClass.Spec.RootVolume.VolumeType) != "" {
-		volumeType = strings.TrimSpace(*nodeClass.Spec.RootVolume.VolumeType)
-	}
-	return size, volumeType
+func resolveRootVolume(nodeClass *v1alpha1.ECSNodeClass) *cceMdl.Volume {
+	return toCCEVolume(&nodeClass.Spec.BlockDeviceMappings.Root)
 }
 
-func defaultDataVolumes(volumeType string) *[]cceMdl.Volume {
-	volumes := []cceMdl.Volume{{
-		Size:       100,
-		Volumetype: volumeType,
-	}}
+func resolveDataVolumes(nodeClass *v1alpha1.ECSNodeClass, rootVolumeType string) *[]cceMdl.Volume {
+	volumes := make([]cceMdl.Volume, 0, 1+len(nodeClass.Spec.BlockDeviceMappings.Users))
+	if nodeClass.Spec.BlockDeviceMappings.K8S != nil {
+		volumes = append(volumes, *toCCEVolume(nodeClass.Spec.BlockDeviceMappings.K8S))
+	} else {
+		volumes = append(volumes, cceMdl.Volume{
+			Size:       100,
+			Volumetype: rootVolumeType,
+		})
+	}
+	for i := range nodeClass.Spec.BlockDeviceMappings.Users {
+		volumes = append(volumes, *toCCEVolume(&nodeClass.Spec.BlockDeviceMappings.Users[i]))
+	}
+	if len(volumes) == 0 {
+		return nil
+	}
 	return lo.ToPtr(volumes)
+}
+
+func toCCEVolume(device *v1alpha1.BlockDevice) *cceMdl.Volume {
+	if device == nil {
+		return nil
+	}
+	volumeType := strings.TrimSpace(device.VolumeType)
+	if volumeType == "" {
+		volumeType = "SSD"
+	}
+	size := device.VolumeSize
+	if size <= 0 {
+		size = 40
+	}
+	return &cceMdl.Volume{
+		Size:       size,
+		Volumetype: volumeType,
+		Iops:       device.IOPS,
+		Throughput: device.Throughput,
+	}
+}
+
+func resolveLogin(nodeClass *v1alpha1.ECSNodeClass) *cceMdl.Login {
+	if nodeClass == nil || strings.TrimSpace(nodeClass.Spec.Login.UserPassword.Password) == "" {
+		return nil
+	}
+	username := strings.TrimSpace(nodeClass.Spec.Login.UserPassword.Username)
+	if username == "" {
+		username = "root"
+	}
+	return &cceMdl.Login{
+		UserPassword: &cceMdl.UserPassword{
+			Username: lo.ToPtr(username),
+			Password: nodeClass.Spec.Login.UserPassword.Password,
+		},
+	}
+}
+
+func resolveRuntime(nodeClass *v1alpha1.ECSNodeClass) *cceMdl.Runtime {
+	if nodeClass.Spec.RuntimeConfiguration == nil {
+		return nil
+	}
+	runtimeType := strings.TrimSpace(nodeClass.Spec.RuntimeConfiguration.Type)
+	if runtimeType == "" {
+		return nil
+	}
+	enums := cceMdl.GetRuntimeNameEnum()
+	runtimeName := enums.CONTAINERD
+	if runtimeType == "docker" {
+		runtimeName = enums.DOCKER
+	}
+	return &cceMdl.Runtime{Name: &runtimeName}
+}
+
+func resolveECSGroupID(nodeClass *v1alpha1.ECSNodeClass) *string {
+	if nodeClass.Spec.ECSGroupID == nil {
+		return nil
+	}
+	if value := strings.TrimSpace(*nodeClass.Spec.ECSGroupID); value != "" {
+		return lo.ToPtr(value)
+	}
+	return nil
 }
 
 func toCCETaints(nodeClaim *karpv1.NodeClaim) *[]cceMdl.Taint {

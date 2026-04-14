@@ -231,15 +231,39 @@ func TestBuildCreateCandidates_PrefersLowerPrice(t *testing.T) {
 	}
 }
 
-func TestNodeSpecForCandidate_AddsDefaultDataVolume(t *testing.T) {
-	rootSize := int32(50)
-	rootType := "GPSSD"
+func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
+	rootIOPS := int32(3000)
+	rootThroughput := int32(125)
+	k8sIOPS := int32(4000)
+	userVolumeSize := int32(50)
+	ecsGroupID := "46ebaf04-ca42-48ca-8057-0b96e6126e1b"
 	provider := &DefaultProvider{}
 	nodeClass := &v1alpha1.ECSNodeClass{
 		Spec: v1alpha1.ECSNodeClassSpec{
-			RootVolume: v1alpha1.RootVolume{
-				Size:       &rootSize,
-				VolumeType: &rootType,
+			ECSGroupID:  &ecsGroupID,
+			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "HCE OS 2.0"},
+			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
+				Root: v1alpha1.BlockDevice{
+					VolumeSize: 120,
+					VolumeType: "GPSSD2",
+					IOPS:       &rootIOPS,
+					Throughput: &rootThroughput,
+				},
+				K8S: &v1alpha1.BlockDevice{
+					VolumeSize: 120,
+					VolumeType: "SAS",
+					IOPS:       &k8sIOPS,
+				},
+				Users: []v1alpha1.BlockDevice{{
+					VolumeSize: userVolumeSize,
+					VolumeType: "SATA",
+				}},
+			},
+			RuntimeConfiguration: &v1alpha1.RuntimeConfiguration{Type: "docker"},
+			Login: v1alpha1.Login{
+				UserPassword: v1alpha1.UserPassword{
+					Password: "ciphertext",
+				},
 			},
 		},
 	}
@@ -253,20 +277,46 @@ func TestNodeSpecForCandidate_AddsDefaultDataVolume(t *testing.T) {
 			zone:         "ap-southeast-3a",
 			subnetID:     "subnet-123",
 		},
-		"Huawei Cloud EulerOS 2.0",
-		"",
+		"HCE OS 2.0",
 	)
 	if spec.RootVolume == nil {
 		t.Fatalf("expected root volume to be set")
 	}
-	if spec.RootVolume.Size != 50 || spec.RootVolume.Volumetype != "GPSSD" {
+	if spec.RootVolume.Size != 120 || spec.RootVolume.Volumetype != "GPSSD2" {
 		t.Fatalf("expected root volume 50/GPSSD, got %#v", spec.RootVolume)
 	}
-	if spec.DataVolumes == nil || len(*spec.DataVolumes) != 1 {
-		t.Fatalf("expected one default data volume, got %#v", spec.DataVolumes)
+	if spec.RootVolume.Iops == nil || *spec.RootVolume.Iops != rootIOPS {
+		t.Fatalf("expected root volume iops %d, got %#v", rootIOPS, spec.RootVolume.Iops)
 	}
-	if got := (*spec.DataVolumes)[0]; got.Size != 100 || got.Volumetype != "GPSSD" {
-		t.Fatalf("expected default data volume 100/GPSSD, got %#v", got)
+	if spec.RootVolume.Throughput == nil || *spec.RootVolume.Throughput != rootThroughput {
+		t.Fatalf("expected root volume throughput %d, got %#v", rootThroughput, spec.RootVolume.Throughput)
+	}
+	if spec.DataVolumes == nil || len(*spec.DataVolumes) != 2 {
+		t.Fatalf("expected k8s and user data volumes, got %#v", spec.DataVolumes)
+	}
+	if got := (*spec.DataVolumes)[0]; got.Size != 120 || got.Volumetype != "SAS" {
+		t.Fatalf("expected first data volume 120/SAS, got %#v", got)
+	}
+	if got := (*spec.DataVolumes)[1]; got.Size != userVolumeSize || got.Volumetype != "SATA" {
+		t.Fatalf("expected second data volume 50/SATA, got %#v", got)
+	}
+	if spec.Runtime == nil || spec.Runtime.Name == nil || spec.Runtime.Name.Value() != "docker" {
+		t.Fatalf("expected docker runtime, got %#v", spec.Runtime)
+	}
+	if spec.Login == nil || spec.Login.UserPassword == nil {
+		t.Fatalf("expected login user password to be set")
+	}
+	if spec.Login.UserPassword.Username == nil || *spec.Login.UserPassword.Username != "root" {
+		t.Fatalf("expected default login username root, got %#v", spec.Login.UserPassword.Username)
+	}
+	if spec.Login.UserPassword.Password != "ciphertext" {
+		t.Fatalf("expected login password to be propagated, got %#v", spec.Login.UserPassword.Password)
+	}
+	if spec.EcsGroupId == nil || *spec.EcsGroupId != ecsGroupID {
+		t.Fatalf("expected ecsGroupId %q, got %#v", ecsGroupID, spec.EcsGroupId)
+	}
+	if spec.Os == nil || *spec.Os != "HCE OS 2.0" {
+		t.Fatalf("expected os %q, got %#v", "HCE OS 2.0", spec.Os)
 	}
 }
 
@@ -511,7 +561,13 @@ func TestCreate_AllowsEmptyServerIDInCreateNodeResponse(t *testing.T) {
 	}
 	nodeClass := &v1alpha1.ECSNodeClass{
 		Spec: v1alpha1.ECSNodeClassSpec{
-			HMISelectorTerms: []v1alpha1.HMISelectorTerm{{Alias: "Huawei Cloud EulerOS 2.0"}},
+			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
+			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
+				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
+			},
+			Login: v1alpha1.Login{
+				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
+			},
 		},
 		Status: v1alpha1.ECSNodeClassStatus{
 			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "zone-a"}},
@@ -567,7 +623,13 @@ func TestCreate_PrefersCheaperCandidate(t *testing.T) {
 	}
 	nodeClass := &v1alpha1.ECSNodeClass{
 		Spec: v1alpha1.ECSNodeClassSpec{
-			HMISelectorTerms: []v1alpha1.HMISelectorTerm{{Alias: "Huawei Cloud EulerOS 2.0"}},
+			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
+			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
+				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
+			},
+			Login: v1alpha1.Login{
+				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
+			},
 		},
 		Status: v1alpha1.ECSNodeClassStatus{
 			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "ap-southeast-3a"}},
@@ -662,7 +724,13 @@ func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T
 	}
 	nodeClass := &v1alpha1.ECSNodeClass{
 		Spec: v1alpha1.ECSNodeClassSpec{
-			HMISelectorTerms: []v1alpha1.HMISelectorTerm{{Alias: "Huawei Cloud EulerOS 2.0"}},
+			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
+			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
+				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
+			},
+			Login: v1alpha1.Login{
+				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
+			},
 		},
 		Status: v1alpha1.ECSNodeClassStatus{
 			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "ap-southeast-3a"}},
