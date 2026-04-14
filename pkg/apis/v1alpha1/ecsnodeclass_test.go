@@ -21,7 +21,7 @@ import "testing"
 func TestECSNodeClassHash(t *testing.T) {
 	rootIOPS := int32(3000)
 	rootThroughput := int32(125)
-	userVolumeSize := int32(50)
+	userVolumeSize := int32(100)
 	ecsGroupID := "46ebaf04-ca42-48ca-8057-0b96e6126e1b"
 
 	base := &ECSNodeClass{
@@ -105,6 +105,62 @@ func TestECSNodeClassHash(t *testing.T) {
 
 		if base.Hash() != other.Hash() {
 			t.Fatalf("expected subnet selector changes not to alter hash")
+		}
+	})
+}
+
+func TestECSNodeClassSpecValidateForCreateNode(t *testing.T) {
+	valid := ECSNodeClassSpec{
+		IMSSelector: IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
+		BlockDeviceMappings: BlockDeviceMappings{
+			Root: BlockDevice{
+				VolumeSize: 40,
+				VolumeType: "SSD",
+			},
+			K8S: &BlockDevice{
+				VolumeSize: 100,
+				VolumeType: "SAS",
+			},
+			Users: []BlockDevice{{
+				VolumeSize: 100,
+				VolumeType: "SATA",
+			}},
+		},
+		Login: Login{
+			UserPassword: UserPassword{Password: "ciphertext"},
+		},
+	}
+
+	t.Run("accepts valid data volumes", func(t *testing.T) {
+		if err := valid.ValidateForCreateNode(); err != nil {
+			t.Fatalf("expected validation to succeed, got %v", err)
+		}
+	})
+
+	t.Run("rejects root volume smaller than 40Gi", func(t *testing.T) {
+		spec := valid
+		spec.BlockDeviceMappings.Root.VolumeSize = 39
+
+		if err := spec.ValidateForCreateNode(); err == nil {
+			t.Fatalf("expected validation to fail for undersized root volume")
+		}
+	})
+
+	t.Run("rejects k8s volume smaller than 100Gi", func(t *testing.T) {
+		spec := valid
+		spec.BlockDeviceMappings.K8S.VolumeSize = 99
+
+		if err := spec.ValidateForCreateNode(); err == nil {
+			t.Fatalf("expected validation to fail for undersized k8s volume")
+		}
+	})
+
+	t.Run("rejects user volume smaller than 100Gi", func(t *testing.T) {
+		spec := valid
+		spec.BlockDeviceMappings.Users[0].VolumeSize = 99
+
+		if err := spec.ValidateForCreateNode(); err == nil {
+			t.Fatalf("expected validation to fail for undersized user volume")
 		}
 	})
 }

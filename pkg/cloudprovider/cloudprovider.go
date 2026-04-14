@@ -95,6 +95,9 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 	if err != nil {
 		return nil, cloudprovider.NewCreateError(fmt.Errorf("resolving nodeclass imsSelector, %w", err), "InvalidNodeClass", "Invalid NodeClass imsSelector")
 	}
+	if err := nodeClass.Spec.ValidateForCreateNode(); err != nil {
+		return nil, cloudprovider.NewCreateError(fmt.Errorf("validating nodeclass, %w", err), "InvalidNodeClass", "Invalid NodeClass blockDeviceMappings")
+	}
 	imageID := osAlias
 	instanceTypes, err := c.instanceTypeProvider.List(ctx, nodeClass)
 	if err != nil {

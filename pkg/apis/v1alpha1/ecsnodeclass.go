@@ -102,6 +102,11 @@ type normalizedBlockDeviceMappings struct {
 	Users []normalizedVolume
 }
 
+const (
+	MinRootVolumeSizeGiB = int32(40)
+	MinDataVolumeSizeGiB = int32(100)
+)
+
 // IMSSelector defines the node operating system family used by CCE CreateNode.
 type IMSSelector struct {
 	// IMSFamily is the node operating system family.
@@ -110,6 +115,9 @@ type IMSSelector struct {
 }
 
 // BlockDeviceMappings defines disk configuration for root, k8s, and user data volumes.
+// +kubebuilder:validation:XValidation:message="blockDeviceMappings.root.volumeSize must be at least 40Gi",rule="self.root.volumeSize >= 40"
+// +kubebuilder:validation:XValidation:message="blockDeviceMappings.k8s.volumeSize must be at least 100Gi when specified",rule="!has(self.k8s) || self.k8s.volumeSize >= 100"
+// +kubebuilder:validation:XValidation:message="blockDeviceMappings.users volumeSize must be at least 100Gi",rule="!has(self.users) || self.users.all(x, x.volumeSize >= 100)"
 type BlockDeviceMappings struct {
 	// K8S is the data volume used by the container runtime and kubelet.
 	// +optional
@@ -180,6 +188,24 @@ func (s *ECSNodeClassSpec) ResolveIMSForCreateNode() (osAlias string, err error)
 		return "", fmt.Errorf("nodeClass.spec.imsSelector.imsFamily is required")
 	}
 	return osAlias, nil
+}
+
+func (s *ECSNodeClassSpec) ValidateForCreateNode() error {
+	if s == nil {
+		return fmt.Errorf("nodeClass.spec is nil")
+	}
+	if s.BlockDeviceMappings.Root.VolumeSize < MinRootVolumeSizeGiB {
+		return fmt.Errorf("nodeClass.spec.blockDeviceMappings.root.volumeSize must be at least %dGi", MinRootVolumeSizeGiB)
+	}
+	if s.BlockDeviceMappings.K8S != nil && s.BlockDeviceMappings.K8S.VolumeSize < MinDataVolumeSizeGiB {
+		return fmt.Errorf("nodeClass.spec.blockDeviceMappings.k8s.volumeSize must be at least %dGi", MinDataVolumeSizeGiB)
+	}
+	for i, user := range s.BlockDeviceMappings.Users {
+		if user.VolumeSize < MinDataVolumeSizeGiB {
+			return fmt.Errorf("nodeClass.spec.blockDeviceMappings.users[%d].volumeSize must be at least %dGi", i, MinDataVolumeSizeGiB)
+		}
+	}
+	return nil
 }
 
 func (s *ECSNodeClassSpec) normalizedIMSSelection() normalizedIMSSelection {

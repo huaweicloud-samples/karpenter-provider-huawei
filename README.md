@@ -18,6 +18,7 @@ This project is at an early **v1alpha1** stage. Please be aware of the following
 - **On-demand only**: Only `on-demand` capacity type is supported. Spot instances are not yet available.
 - **Kubelet configuration**: Only the following fields are consumed at runtime for capacity/overhead calculations: `maxPods`, `podsPerCore`, `kubeReserved`, `systemReserved`, `evictionHard`, `evictionSoft`. Other fields (`clusterDNS`, `evictionSoftGracePeriod`, `evictionMaxPodGracePeriod`, `imageGCHighThresholdPercent`, `imageGCLowThresholdPercent`, `cpuCFSQuota`) are defined in the API schema but are not yet wired to node launch configuration.
 - **Default k8s data disk**: CCE requires a data disk for worker nodes. If `spec.blockDeviceMappings.k8s` is omitted, a **100 GiB data disk** using the same type as `spec.blockDeviceMappings.root` is added automatically.
+- **Data disk minimum size**: In the current CCE CreateNode validation, explicit `k8s` and `users` data volumes must be at least **100 GiB**.
 
 ## Prerequisites
 
@@ -92,7 +93,7 @@ spec:
       volumeSize: 120
       volumeType: SATA
     users:
-      - volumeSize: 50
+      - volumeSize: 100
         volumeType: SAS
   runtimeConfiguration:
     type: containerd

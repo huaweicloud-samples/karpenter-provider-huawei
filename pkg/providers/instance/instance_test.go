@@ -235,7 +235,7 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 	rootIOPS := int32(3000)
 	rootThroughput := int32(125)
 	k8sIOPS := int32(4000)
-	userVolumeSize := int32(50)
+	userVolumeSize := int32(100)
 	ecsGroupID := "46ebaf04-ca42-48ca-8057-0b96e6126e1b"
 	provider := &DefaultProvider{}
 	nodeClass := &v1alpha1.ECSNodeClass{
@@ -298,7 +298,7 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 		t.Fatalf("expected first data volume 120/SAS, got %#v", got)
 	}
 	if got := (*spec.DataVolumes)[1]; got.Size != userVolumeSize || got.Volumetype != "SATA" {
-		t.Fatalf("expected second data volume 50/SATA, got %#v", got)
+		t.Fatalf("expected second data volume 100/SATA, got %#v", got)
 	}
 	if spec.Runtime == nil || spec.Runtime.Name == nil || spec.Runtime.Name.Value() != "docker" {
 		t.Fatalf("expected docker runtime, got %#v", spec.Runtime)

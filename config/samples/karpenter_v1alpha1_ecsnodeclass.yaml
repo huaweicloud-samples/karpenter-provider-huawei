@@ -18,9 +18,9 @@ spec:
       volumeSize: 120
       volumeType: SATA
     users:
-      - volumeSize: 50
+      - volumeSize: 100
         volumeType: SAS
-      - volumeSize: 50
+      - volumeSize: 100
         volumeType: SATA
   runtimeConfiguration:
     type: containerd
