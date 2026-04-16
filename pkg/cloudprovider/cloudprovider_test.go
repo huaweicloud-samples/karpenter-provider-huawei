@@ -18,6 +18,7 @@ package cloudprovider
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -86,11 +87,13 @@ func (s *stubCloudProviderInstanceTypeProvider) List(context.Context, instancety
 }
 
 type stubCloudProviderInstanceProvider struct {
-	instance *instanceprovider.Instance
-	err      error
+	instance    *instanceprovider.Instance
+	err         error
+	createCalls int
 }
 
 func (s *stubCloudProviderInstanceProvider) Create(context.Context, *v1alpha1.ECSNodeClass, *karpv1.NodeClaim, map[string]string, []*karpcloudprovider.InstanceType) (*instanceprovider.Instance, error) {
+	s.createCalls++
 	return s.instance, s.err
 }
 
@@ -142,7 +145,13 @@ func TestCreate_AnnotatesReturnedNodeClaimWithECSNodeClassHash(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "default"},
 		Spec: v1alpha1.ECSNodeClassSpec{
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{{ID: "123e4567-e89b-12d3-a456-426614174000"}},
-			HMISelectorTerms:    []v1alpha1.HMISelectorTerm{{Alias: " Huawei Cloud EulerOS 2.0 "}},
+			IMSSelector:         v1alpha1.IMSSelector{IMSFamily: " HCE OS 2.0 "},
+			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
+				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
+			},
+			Login: v1alpha1.Login{
+				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
+			},
 		},
 		Status: v1alpha1.ECSNodeClassStatus{
 			Subnets: []v1alpha1.Subnet{{ID: "subnet-123", Zone: "zone-a"}},
@@ -199,6 +208,65 @@ func TestCreate_AnnotatesReturnedNodeClaimWithECSNodeClassHash(t *testing.T) {
 	}
 	if got := created.Annotations[v1alpha1.AnnotationECSNodeClassHashVersion]; got != v1alpha1.ECSNodeClassHashVersion {
 		t.Fatalf("expected ecsnodeclass hash version %q, got %q", v1alpha1.ECSNodeClassHashVersion, got)
+	}
+}
+
+func TestCreate_RejectsNodeClassWithUndersizedDataVolumeBeforeCallingCloudAPI(t *testing.T) {
+	nodeClass := &v1alpha1.ECSNodeClass{
+		ObjectMeta: metav1.ObjectMeta{Name: "default"},
+		Spec: v1alpha1.ECSNodeClassSpec{
+			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{{ID: "123e4567-e89b-12d3-a456-426614174000"}},
+			IMSSelector:         v1alpha1.IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
+			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
+				Root: v1alpha1.BlockDevice{VolumeSize: 40, VolumeType: "SSD"},
+				Users: []v1alpha1.BlockDevice{{
+					VolumeSize: 10,
+					VolumeType: "SAS",
+				}},
+			},
+			Login: v1alpha1.Login{
+				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
+			},
+		},
+		Status: v1alpha1.ECSNodeClassStatus{
+			Subnets: []v1alpha1.Subnet{{ID: "subnet-123", Zone: "zone-a"}},
+		},
+	}
+	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeSubnetsReady)
+
+	kubeClient := fake.NewClientBuilder().WithScheme(clientgoscheme.Scheme).WithObjects(nodeClass).Build()
+	instanceProvider := &stubCloudProviderInstanceProvider{}
+	provider := &CloudProvider{
+		kubeClient: kubeClient,
+		instanceTypeProvider: &stubCloudProviderInstanceTypeProvider{
+			instanceTypes: []*karpcloudprovider.InstanceType{{
+				Name: "c9.large.2",
+				Requirements: karpscheduling.NewRequirements(
+					karpscheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "zone-a"),
+				),
+			}},
+		},
+		instanceProvider: instanceProvider,
+	}
+	nodeClaim := &karpv1.NodeClaim{
+		Spec: karpv1.NodeClaimSpec{
+			NodeClassRef: &karpv1.NodeClassReference{
+				Group: "karpenter.k8s.huawei",
+				Kind:  "ECSNodeClass",
+				Name:  "default",
+			},
+		},
+	}
+
+	_, err := provider.Create(context.Background(), nodeClaim)
+	if err == nil {
+		t.Fatalf("expected create to fail for undersized data volume")
+	}
+	if instanceProvider.createCalls != 0 {
+		t.Fatalf("expected instance provider not to be called, got %d call(s)", instanceProvider.createCalls)
+	}
+	if got, want := err.Error(), "nodeClass.spec.blockDeviceMappings.users[0].volumeSize must be at least 100Gi"; !strings.Contains(got, want) {
+		t.Fatalf("expected error to contain %q, got %q", want, got)
 	}
 }
 

@@ -51,115 +51,233 @@ type ECSNodeClassSpec struct {
 	// +optional
 	Kubelet *KubeletConfiguration `json:"kubelet,omitempty"`
 
-	// HMISelectorTerms is a list of selector terms used by Karpenter to pick the node OS or private image
-	// when calling CCE CreateNode. The terms are ORed.
-	//
-	// - alias maps to CreateNode spec.os (NodeSpec.Os)
-	// - id maps to CreateNode spec.extendParam.alpha.cce/NodeImageID (NodeExtendParam.AlphaCceNodeImageID)
-	// +kubebuilder:validation:XValidation:message="hmiSelectorTerms cannot be empty",rule="self.size() != 0"
-	// +kubebuilder:validation:XValidation:message="expected at least one, got none, ['alias', 'id']",rule="self.all(x, has(x.alias) || has(x.id))"
-	// +kubebuilder:validation:XValidation:message="'alias' and 'id' are mutually exclusive within a single hmiSelectorTerm",rule="!self.exists(x, has(x.alias) && has(x.id))"
-	// +kubebuilder:validation:MinItems:=1
-	// +kubebuilder:validation:MaxItems:=30
-	// +required
-	HMISelectorTerms []HMISelectorTerm `json:"hmiSelectorTerms" hash:"ignore"`
+	// ECSGroupID is the ECS server group ID used when creating CCE nodes.
+	// +optional
+	ECSGroupID *string `json:"ecsGroupId,omitempty"`
 
-	// RootVolume is the system disk configuration used for CCE CreateNode.
+	// IMSSelector selects the node operating system family.
 	// +required
-	RootVolume RootVolume `json:"rootVolume" hash:"ignore"`
+	IMSSelector IMSSelector `json:"imsSelector" hash:"ignore"`
+
+	// BlockDeviceMappings defines the root, k8s, and user data volumes used for CCE CreateNode.
+	// +required
+	BlockDeviceMappings BlockDeviceMappings `json:"blockDeviceMappings" hash:"ignore"`
+
+	// RuntimeConfiguration configures the container runtime used on the node.
+	// +optional
+	RuntimeConfiguration *RuntimeConfiguration `json:"runtimeConfiguration,omitempty" hash:"ignore"`
+
+	// Login defines the node login configuration.
+	// +required
+	Login Login `json:"login" hash:"ignore"`
 }
 
-type normalizedHMISelection struct {
-	Alias string
-	ID    string
+type normalizedIMSSelection struct {
+	Family string
 }
 
-type normalizedRootVolume struct {
+type normalizedVolume struct {
 	Size       int32
 	VolumeType string
+	Iops       int32
+	Throughput int32
 }
 
-// RootVolume defines the system disk configuration for nodes created via CCE.
-type RootVolume struct {
-	// Size is the system disk size in GB.
-	// +kubebuilder:validation:Minimum:=40
-	// +kubebuilder:validation:Maximum:=1024
-	// +kubebuilder:default:=40
-	// +optional
-	Size *int32 `json:"size,omitempty"`
+type normalizedRuntimeConfiguration struct {
+	Type string
+}
 
-	// VolumeType is the system disk type.
-	// Common values: SSD, SAS, SATA, ESSD, GPSSD, ESSD2, GPSSD2.
+type normalizedUserPassword struct {
+	Username string
+	Password string
+}
+
+type normalizedLogin struct {
+	UserPassword *normalizedUserPassword
+}
+
+type normalizedBlockDeviceMappings struct {
+	Root  normalizedVolume
+	K8S   *normalizedVolume
+	Users []normalizedVolume
+}
+
+const (
+	MinRootVolumeSizeGiB = int32(40)
+	MinDataVolumeSizeGiB = int32(100)
+)
+
+// IMSSelector defines the node operating system family used by CCE CreateNode.
+type IMSSelector struct {
+	// IMSFamily is the node operating system family.
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:default:=SSD
-	// +optional
-	VolumeType *string `json:"volumeType,omitempty"`
+	IMSFamily string `json:"imsFamily"`
 }
 
-// HMISelectorTerm defines selection logic for a hmi used by Karpenter to launch nodes.
-// If multiple fields are used for selection, the requirements are ANDed.
-type HMISelectorTerm struct {
-	// Alias is the node operating system type used by CCE CreateNode.
-	// It maps to CreateNode spec.os (NodeSpec.Os).
+// BlockDeviceMappings defines disk configuration for root, k8s, and user data volumes.
+// +kubebuilder:validation:XValidation:message="blockDeviceMappings.root.volumeSize must be at least 40Gi",rule="self.root.volumeSize >= 40"
+// +kubebuilder:validation:XValidation:message="blockDeviceMappings.k8s.volumeSize must be at least 100Gi when specified",rule="!has(self.k8s) || self.k8s.volumeSize >= 100"
+// +kubebuilder:validation:XValidation:message="blockDeviceMappings.users volumeSize must be at least 100Gi",rule="!has(self.users) || self.users.all(x, x.volumeSize >= 100)"
+type BlockDeviceMappings struct {
+	// K8S is the data volume used by the container runtime and kubelet.
+	// +optional
+	K8S *BlockDevice `json:"k8s,omitempty"`
+
+	// Root is the system disk.
+	// +required
+	Root BlockDevice `json:"root"`
+
+	// Users are additional user data disks.
+	// +optional
+	Users []BlockDevice `json:"users,omitempty"`
+}
+
+// BlockDevice defines a CCE volume.
+type BlockDevice struct {
+	// VolumeSize is the disk size in GiB.
+	// +kubebuilder:validation:Minimum:=10
+	VolumeSize int32 `json:"volumeSize"`
+
+	// VolumeType is the disk type.
 	// +kubebuilder:validation:MinLength=1
-	// +kubebuilder:validation:MaxLength=128
-	// +optional
-	Alias string `json:"alias,omitempty"`
+	VolumeType string `json:"volumeType"`
 
-	// ID is the private image ID used by CCE CreateNode.
-	// It maps to CreateNode spec.extendParam.alpha.cce/NodeImageID (NodeExtendParam.AlphaCceNodeImageID).
-	// +kubebuilder:validation:Pattern="^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+	// IOPS is required for GPSSD2 and ESSD2.
 	// +optional
-	ID string `json:"id,omitempty"`
+	IOPS *int32 `json:"iops,omitempty"`
+
+	// Throughput is required for GPSSD2.
+	// +optional
+	Throughput *int32 `json:"throughput,omitempty"`
 }
 
-// ResolveHMIForCreateNode resolves the node OS / image selection for CCE CreateNode.
-//
-// MVP behavior: the first term is selected.
-// - alias maps to CreateNode spec.os (NodeSpec.Os)
-// - id maps to CreateNode spec.extendParam.alpha.cce/NodeImageID (NodeExtendParam.AlphaCceNodeImageID)
-func (s *ECSNodeClassSpec) ResolveHMIForCreateNode() (osAlias string, nodeImageID string, err error) {
+// RuntimeConfiguration defines the node container runtime.
+type RuntimeConfiguration struct {
+	// Type is the container runtime type.
+	// +kubebuilder:validation:Enum=docker;containerd
+	// +optional
+	Type string `json:"type,omitempty"`
+}
+
+// Login defines the node login configuration.
+type Login struct {
+	// UserPassword defines username/password login.
+	// +required
+	UserPassword UserPassword `json:"userPassword"`
+}
+
+// UserPassword defines the node login credentials.
+type UserPassword struct {
+	// Username defaults to root.
+	// +kubebuilder:validation:Enum=root
+	// +optional
+	Username string `json:"username,omitempty"`
+
+	// Password is the salted and encrypted node password.
+	// +kubebuilder:validation:MinLength=1
+	Password string `json:"password"`
+}
+
+// ResolveIMSForCreateNode resolves the node OS selection for CCE CreateNode.
+func (s *ECSNodeClassSpec) ResolveIMSForCreateNode() (osAlias string, err error) {
 	if s == nil {
-		return "", "", fmt.Errorf("nodeClass.spec is nil")
+		return "", fmt.Errorf("nodeClass.spec is nil")
 	}
-	if len(s.HMISelectorTerms) == 0 {
-		return "", "", fmt.Errorf("nodeClass.spec.hmiSelectorTerms is required")
+	osAlias = strings.TrimSpace(s.IMSSelector.IMSFamily)
+	if osAlias == "" {
+		return "", fmt.Errorf("nodeClass.spec.imsSelector.imsFamily is required")
 	}
-	term := s.HMISelectorTerms[0]
-	osAlias = strings.TrimSpace(term.Alias)
-	nodeImageID = strings.TrimSpace(term.ID)
-
-	if osAlias == "" && nodeImageID == "" {
-		return "", "", fmt.Errorf("nodeClass.spec.hmiSelectorTerms[0] must set one of alias or id")
-	}
-	if osAlias != "" && nodeImageID != "" {
-		return "", "", fmt.Errorf("nodeClass.spec.hmiSelectorTerms[0] cannot set both alias and id")
-	}
-	return osAlias, nodeImageID, nil
+	return osAlias, nil
 }
 
-func (s *ECSNodeClassSpec) normalizedHMISelection() normalizedHMISelection {
-	if s == nil || len(s.HMISelectorTerms) == 0 {
-		return normalizedHMISelection{}
+func (s *ECSNodeClassSpec) ValidateForCreateNode() error {
+	if s == nil {
+		return fmt.Errorf("nodeClass.spec is nil")
 	}
-	return normalizedHMISelection{
-		Alias: strings.TrimSpace(s.HMISelectorTerms[0].Alias),
-		ID:    strings.TrimSpace(s.HMISelectorTerms[0].ID),
+	if s.BlockDeviceMappings.Root.VolumeSize < MinRootVolumeSizeGiB {
+		return fmt.Errorf("nodeClass.spec.blockDeviceMappings.root.volumeSize must be at least %dGi", MinRootVolumeSizeGiB)
+	}
+	if s.BlockDeviceMappings.K8S != nil && s.BlockDeviceMappings.K8S.VolumeSize < MinDataVolumeSizeGiB {
+		return fmt.Errorf("nodeClass.spec.blockDeviceMappings.k8s.volumeSize must be at least %dGi", MinDataVolumeSizeGiB)
+	}
+	for i, user := range s.BlockDeviceMappings.Users {
+		if user.VolumeSize < MinDataVolumeSizeGiB {
+			return fmt.Errorf("nodeClass.spec.blockDeviceMappings.users[%d].volumeSize must be at least %dGi", i, MinDataVolumeSizeGiB)
+		}
+	}
+	return nil
+}
+
+func (s *ECSNodeClassSpec) normalizedIMSSelection() normalizedIMSSelection {
+	if s == nil {
+		return normalizedIMSSelection{}
+	}
+	return normalizedIMSSelection{
+		Family: strings.TrimSpace(s.IMSSelector.IMSFamily),
 	}
 }
 
-func (r RootVolume) normalized() normalizedRootVolume {
-	size := int32(40)
-	if r.Size != nil && *r.Size > 0 {
-		size = *r.Size
+func normalizeBlockDevice(device *BlockDevice) normalizedVolume {
+	if device == nil {
+		return normalizedVolume{}
 	}
-	volumeType := "SSD"
-	if r.VolumeType != nil && strings.TrimSpace(*r.VolumeType) != "" {
-		volumeType = strings.TrimSpace(*r.VolumeType)
+	size := device.VolumeSize
+	if size <= 0 {
+		size = 40
 	}
-	return normalizedRootVolume{
+	volumeType := strings.TrimSpace(device.VolumeType)
+	if volumeType == "" {
+		volumeType = "SSD"
+	}
+	return normalizedVolume{
 		Size:       size,
 		VolumeType: volumeType,
+		Iops:       lo.FromPtrOr(device.IOPS, 0),
+		Throughput: lo.FromPtrOr(device.Throughput, 0),
+	}
+}
+
+func (s *ECSNodeClassSpec) normalizedBlockDeviceMappings() normalizedBlockDeviceMappings {
+	if s == nil {
+		return normalizedBlockDeviceMappings{}
+	}
+	users := make([]normalizedVolume, 0, len(s.BlockDeviceMappings.Users))
+	for _, user := range s.BlockDeviceMappings.Users {
+		users = append(users, normalizeBlockDevice(&user))
+	}
+	var k8s *normalizedVolume
+	if s.BlockDeviceMappings.K8S != nil {
+		n := normalizeBlockDevice(s.BlockDeviceMappings.K8S)
+		k8s = &n
+	}
+	return normalizedBlockDeviceMappings{
+		Root:  normalizeBlockDevice(&s.BlockDeviceMappings.Root),
+		K8S:   k8s,
+		Users: users,
+	}
+}
+
+func (s *ECSNodeClassSpec) normalizedRuntimeConfiguration() normalizedRuntimeConfiguration {
+	runtimeType := "containerd"
+	if s != nil && s.RuntimeConfiguration != nil && strings.TrimSpace(s.RuntimeConfiguration.Type) != "" {
+		runtimeType = strings.TrimSpace(s.RuntimeConfiguration.Type)
+	}
+	return normalizedRuntimeConfiguration{Type: runtimeType}
+}
+
+func (s *ECSNodeClassSpec) normalizedLogin() normalizedLogin {
+	if s == nil {
+		return normalizedLogin{}
+	}
+	username := strings.TrimSpace(s.Login.UserPassword.Username)
+	if username == "" {
+		username = "root"
+	}
+	return normalizedLogin{
+		UserPassword: &normalizedUserPassword{
+			Username: username,
+			Password: s.Login.UserPassword.Password,
+		},
 	}
 }
 
@@ -188,17 +306,21 @@ type ECSNodeClass struct {
 // 1. A field changes its default value for an existing field that is already hashed
 // 2. A field is added to the hash calculation with an already-set value
 // 3. A field is removed from the hash calculations
-const ECSNodeClassHashVersion = "v1"
+const ECSNodeClassHashVersion = "v2"
 
 func (in *ECSNodeClass) Hash() string {
 	return fmt.Sprint(lo.Must(hashstructure.Hash(struct {
-		Spec                ECSNodeClassSpec
-		EffectiveHMI        normalizedHMISelection
-		EffectiveRootVolume normalizedRootVolume
+		Spec                         ECSNodeClassSpec
+		EffectiveIMS                 normalizedIMSSelection
+		EffectiveBlockDeviceMappings normalizedBlockDeviceMappings
+		EffectiveRuntime             normalizedRuntimeConfiguration
+		EffectiveLogin               normalizedLogin
 	}{
-		Spec:                in.Spec,
-		EffectiveHMI:        in.Spec.normalizedHMISelection(),
-		EffectiveRootVolume: in.Spec.RootVolume.normalized(),
+		Spec:                         in.Spec,
+		EffectiveIMS:                 in.Spec.normalizedIMSSelection(),
+		EffectiveBlockDeviceMappings: in.Spec.normalizedBlockDeviceMappings(),
+		EffectiveRuntime:             in.Spec.normalizedRuntimeConfiguration(),
+		EffectiveLogin:               in.Spec.normalizedLogin(),
 	}, hashstructure.FormatV2, &hashstructure.HashOptions{
 		SlicesAsSets:    true,
 		IgnoreZeroValue: true,
