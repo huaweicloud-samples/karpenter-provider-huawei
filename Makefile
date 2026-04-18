@@ -1,5 +1,17 @@
+# Release variables
+RELEASE_TAG ?= $(shell git describe --abbrev=0 2>/dev/null)
+GORELEASER_VERSION ?= v1.24.0
+
 # Image URL to use all building/pushing image targets
-IMG ?= huaweiclouddeveloper/karpenter/controller:latest
+IMAGE_REPO ?= huaweiclouddeveloper
+STAGING_REGISTRY ?= ghcr.io/$(IMAGE_REPO)
+REGISTRY ?= $(STAGING_REGISTRY)
+CORE_IMAGE_NAME ?= karpenter-provider-huawei
+CORE_CONTROLLER_IMG ?= $(REGISTRY)/$(CORE_IMAGE_NAME)
+IMG ?= $(CORE_CONTROLLER_IMG):$(RELEASE_TAG)
+
+GORELEASER_CONFIG := .goreleaser.yaml
+
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -230,6 +242,7 @@ KUSTOMIZE ?= $(LOCALBIN)/kustomize
 CONTROLLER_GEN ?= $(LOCALBIN)/controller-gen
 ENVTEST ?= $(LOCALBIN)/setup-envtest
 GOLANGCI_LINT = $(LOCALBIN)/golangci-lint
+GORELEASER ?= $(LOCALBIN)/goreleaser
 
 ## Tool Versions
 KUSTOMIZE_VERSION ?= v5.7.1
@@ -274,6 +287,11 @@ golangci-lint: $(GOLANGCI_LINT) ## Download golangci-lint locally if necessary.
 $(GOLANGCI_LINT): $(LOCALBIN)
 	$(call go-install-tool,$(GOLANGCI_LINT),github.com/golangci/golangci-lint/v2/cmd/golangci-lint,$(GOLANGCI_LINT_VERSION))
 
+.PHONY: goreleaser
+goreleaser: $(GORELEASER) ## Download goreleaser locally if necessary.
+$(GORELEASER): $(LOCALBIN)
+	$(call go-install-tool,$(GORELEASER),github.com/goreleaser/goreleaser,$(GORELEASER_VERSION))
+
 # go-install-tool will 'go install' any package with custom target and name of binary, if it doesn't exist
 # $1 - target path with name of binary
 # $2 - package url which can be installed
@@ -293,3 +311,20 @@ endef
 define gomodver
 $(shell go list -m -f '{{if .Replace}}{{.Replace.Version}}{{else}}{{.Version}}{{end}}' $(1) 2>/dev/null)
 endef
+
+
+##@ release:
+
+.PHONY: check-github-token
+check-github-token: ## Check if the github token is set
+	@if [ -z "${GITHUB_TOKEN}" ]; then echo "GITHUB_TOKEN is not set"; exit 1; fi
+
+.PHONY: check-release-tag
+check-release-tag: ## Check if the release tag is set
+	@if [ -z "${RELEASE_TAG}" ]; then echo "RELEASE_TAG is not set"; exit 1; fi
+	# @if ! [ -z "$$(git status --porcelain)" ]; then echo "Your local git repository contains uncommitted changes, use git clean before proceeding."; exit 1; fi
+
+.PHONY: release
+release: check-github-token check-release-tag $(GORELEASER)
+	git checkout "${RELEASE_TAG}"
+	$(GORELEASER) release --config $(GORELEASER_CONFIG) --clean
