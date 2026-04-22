@@ -1,4 +1,8 @@
-builds: []
+builds:
+  - id: karpenter-provider-huawei
+    main: ./cmd/controller
+    env:
+      - CGO_ENABLED=0
 
 archives: []
 
