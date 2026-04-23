@@ -1,6 +1,6 @@
 # Release variables
 RELEASE_TAG ?= $(shell git describe --abbrev=0 2>/dev/null)
-GORELEASER_VERSION ?= v1.24.0
+GORELEASER_VERSION ?= v1.26.2
 
 # Image URL to use all building/pushing image targets
 IMAGE_REPO ?= huaweiclouddeveloper
