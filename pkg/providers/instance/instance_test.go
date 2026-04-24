@@ -20,6 +20,7 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/sdkerr"
 	cceMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cce/v3/model"
@@ -34,6 +35,7 @@ import (
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
 	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/subnet"
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/utils"
 )
 
 func TestNodeIDFromProviderID(t *testing.T) {
@@ -794,6 +796,190 @@ func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T
 	if got := cceapi.createNodeReqs[1].Body.Spec.Flavor; got != "t6.xlarge.2" {
 		t.Fatalf("expected second CreateNode to request fallback flavor, got %q", got)
 	}
+}
+
+func TestCreate_MarksUnavailableOfferingAndFallsBackOnInsufficientCapacity(t *testing.T) {
+	availabilityCache := utils.NewOfferingAvailabilityCache(time.Minute, time.Minute)
+	cceapi := &stubCCEAPI{
+		createNodeResps: []*cceMdl.CreateNodeResponse{
+			nil,
+			{
+				Metadata: &cceMdl.NodeMetadata{Uid: lo.ToPtr("node-789")},
+				Status:   &cceMdl.NodeStatus{},
+			},
+		},
+		createNodeErrs: []error{
+			&sdkerr.ServiceResponseError{
+				StatusCode:   409,
+				ErrorCode:    "CCE_CM.0021",
+				ErrorMessage: "[x1e.12u.96g|ap-southeast-3a] flavor is insufficient in specified az",
+			},
+			nil,
+		},
+	}
+	provider := &DefaultProvider{
+		clusterID:                 "cluster-id",
+		cceapi:                    cceapi,
+		subnetProvider:            newStubSubnetProvider("ap-southeast-3a", "subnet-a"),
+		offeringAvailabilityCache: availabilityCache,
+	}
+
+	instance, err := provider.Create(context.Background(), newTestNodeClass(), &karpv1.NodeClaim{}, nil, []*cloudprovider.InstanceType{
+		newOnDemandInstanceType("x1e.12u.96g", 1.0, "ap-southeast-3a"),
+		newOnDemandInstanceType("c7.4xlarge.2", 2.0, "ap-southeast-3a"),
+	})
+	if err != nil {
+		t.Fatalf("expected create to succeed after fallback, got %v", err)
+	}
+	if instance.Flavor != "c7.4xlarge.2" {
+		t.Fatalf("expected fallback flavor %q, got %q", "c7.4xlarge.2", instance.Flavor)
+	}
+	if len(cceapi.createNodeReqs) != 2 {
+		t.Fatalf("expected two CreateNode calls, got %d", len(cceapi.createNodeReqs))
+	}
+	if !availabilityCache.IsUnavailable(karpv1.CapacityTypeOnDemand, "x1e.12u.96g", "ap-southeast-3a") {
+		t.Fatalf("expected insufficient offering to be marked unavailable")
+	}
+}
+
+func TestCreate_SkipsUnavailableOfferingsOnSubsequentCalls(t *testing.T) {
+	availabilityCache := utils.NewOfferingAvailabilityCache(time.Minute, time.Minute)
+	availabilityCache.MarkUnavailable(karpv1.CapacityTypeOnDemand, "x1e.12u.96g", "ap-southeast-3a")
+
+	cceapi := &stubCCEAPI{
+		createNodeResp: &cceMdl.CreateNodeResponse{
+			Metadata: &cceMdl.NodeMetadata{Uid: lo.ToPtr("node-999")},
+			Status:   &cceMdl.NodeStatus{},
+		},
+	}
+	provider := &DefaultProvider{
+		clusterID:                 "cluster-id",
+		cceapi:                    cceapi,
+		subnetProvider:            newStubSubnetProvider("ap-southeast-3a", "subnet-a"),
+		offeringAvailabilityCache: availabilityCache,
+	}
+
+	instance, err := provider.Create(context.Background(), newTestNodeClass(), &karpv1.NodeClaim{}, nil, []*cloudprovider.InstanceType{
+		newOnDemandInstanceType("x1e.12u.96g", 1.0, "ap-southeast-3a"),
+		newOnDemandInstanceType("c7.4xlarge.2", 2.0, "ap-southeast-3a"),
+		newOnDemandInstanceType("m7.4xlarge.2", 3.0, "ap-southeast-3a"),
+	})
+	if err != nil {
+		t.Fatalf("expected create to succeed after skipping cached offering, got %v", err)
+	}
+	if instance.Flavor != "c7.4xlarge.2" {
+		t.Fatalf("expected next cheapest available flavor %q, got %q", "c7.4xlarge.2", instance.Flavor)
+	}
+	if len(cceapi.createNodeReqs) != 1 {
+		t.Fatalf("expected one CreateNode call after skipping cached offering, got %d", len(cceapi.createNodeReqs))
+	}
+	if got := cceapi.createNodeReqs[0].Body.Spec.Flavor; got != "c7.4xlarge.2" {
+		t.Fatalf("expected CreateNode to skip cached cheaper flavor and request %q, got %q", "c7.4xlarge.2", got)
+	}
+}
+
+func TestCreate_ReturnsInsufficientCapacityWhenAllCompatibleOfferingsTemporarilyUnavailable(t *testing.T) {
+	availabilityCache := utils.NewOfferingAvailabilityCache(time.Minute, time.Minute)
+	availabilityCache.MarkUnavailable(karpv1.CapacityTypeOnDemand, "x1e.12u.96g", "ap-southeast-3a")
+	availabilityCache.MarkUnavailable(karpv1.CapacityTypeOnDemand, "c7.4xlarge.2", "ap-southeast-3a")
+
+	cceapi := &stubCCEAPI{}
+	provider := &DefaultProvider{
+		clusterID:                 "cluster-id",
+		cceapi:                    cceapi,
+		subnetProvider:            newStubSubnetProvider("ap-southeast-3a", "subnet-a"),
+		offeringAvailabilityCache: availabilityCache,
+	}
+
+	_, err := provider.Create(context.Background(), newTestNodeClass(), &karpv1.NodeClaim{}, nil, []*cloudprovider.InstanceType{
+		newOnDemandInstanceType("x1e.12u.96g", 1.0, "ap-southeast-3a"),
+		newOnDemandInstanceType("c7.4xlarge.2", 2.0, "ap-southeast-3a"),
+	})
+	if !cloudprovider.IsInsufficientCapacityError(err) {
+		t.Fatalf("expected insufficient capacity error, got %v", err)
+	}
+	if len(cceapi.createNodeReqs) != 0 {
+		t.Fatalf("expected no CreateNode calls when all compatible offerings are temporarily unavailable, got %d", len(cceapi.createNodeReqs))
+	}
+}
+
+func TestCreate_UnavailableOfferingCacheIsZoneScoped(t *testing.T) {
+	availabilityCache := utils.NewOfferingAvailabilityCache(time.Minute, time.Minute)
+	availabilityCache.MarkUnavailable(karpv1.CapacityTypeOnDemand, "x1e.12u.96g", "ap-southeast-3a")
+
+	cceapi := &stubCCEAPI{
+		createNodeResp: &cceMdl.CreateNodeResponse{
+			Metadata: &cceMdl.NodeMetadata{Uid: lo.ToPtr("node-zone-b")},
+			Status:   &cceMdl.NodeStatus{},
+		},
+	}
+	provider := &DefaultProvider{
+		clusterID: "cluster-id",
+		cceapi:    cceapi,
+		subnetProvider: &stubSubnetProvider{
+			zonalSubnets: map[string]*subnet.Subnet{
+				"ap-southeast-3a": {ID: "subnet-a", Zone: "ap-southeast-3a", AvailableIPAddressCount: 100},
+				"ap-southeast-3b": {ID: "subnet-b", Zone: "ap-southeast-3b", AvailableIPAddressCount: 100},
+			},
+		},
+		offeringAvailabilityCache: availabilityCache,
+	}
+
+	instance, err := provider.Create(context.Background(), newTestNodeClass(), &karpv1.NodeClaim{}, nil, []*cloudprovider.InstanceType{
+		newOnDemandInstanceType("x1e.12u.96g", 1.0, "ap-southeast-3a", "ap-southeast-3b"),
+	})
+	if err != nil {
+		t.Fatalf("expected create to succeed using unaffected zone, got %v", err)
+	}
+	if instance.Zone != "ap-southeast-3b" {
+		t.Fatalf("expected zone-scoped unavailability to allow zone-b, got %q", instance.Zone)
+	}
+	if len(cceapi.createNodeReqs) != 1 {
+		t.Fatalf("expected one CreateNode call, got %d", len(cceapi.createNodeReqs))
+	}
+	if got := cceapi.createNodeReqs[0].Body.Spec.Az; got != "ap-southeast-3b" {
+		t.Fatalf("expected CreateNode to target unaffected zone %q, got %q", "ap-southeast-3b", got)
+	}
+}
+
+func newTestNodeClass() *v1alpha1.ECSNodeClass {
+	return &v1alpha1.ECSNodeClass{
+		Spec: v1alpha1.ECSNodeClassSpec{
+			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
+			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
+				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
+			},
+			Login: v1alpha1.Login{
+				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
+			},
+		},
+		Status: v1alpha1.ECSNodeClassStatus{
+			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "ap-southeast-3a"}},
+		},
+	}
+}
+
+func newStubSubnetProvider(zone, subnetID string) *stubSubnetProvider {
+	return &stubSubnetProvider{
+		zonalSubnets: map[string]*subnet.Subnet{
+			zone: {ID: subnetID, Zone: zone, AvailableIPAddressCount: 100},
+		},
+	}
+}
+
+func newOnDemandInstanceType(name string, price float64, zones ...string) *cloudprovider.InstanceType {
+	offerings := make(cloudprovider.Offerings, 0, len(zones))
+	for _, zone := range zones {
+		offerings = append(offerings, &cloudprovider.Offering{
+			Available: true,
+			Price:     price,
+			Requirements: scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
+				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
+			),
+		})
+	}
+	return &cloudprovider.InstanceType{Name: name, Offerings: offerings}
 }
 
 func hasCCETaint(taints *[]cceMdl.Taint, key, effect string) bool {

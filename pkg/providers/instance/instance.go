@@ -29,6 +29,7 @@ import (
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 	"sigs.k8s.io/karpenter/pkg/scheduling"
@@ -36,6 +37,7 @@ import (
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
 	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/subnet"
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/utils"
 )
 
 const (
@@ -58,29 +60,34 @@ type Provider interface {
 }
 
 type DefaultProvider struct {
-	clusterID      string
-	cceapi         sdk.CCEAPI
-	ecsapi         sdk.ECSAPI
-	subnetProvider subnet.Provider
+	clusterID                 string
+	cceapi                    sdk.CCEAPI
+	ecsapi                    sdk.ECSAPI
+	subnetProvider            subnet.Provider
+	offeringAvailabilityCache *utils.OfferingAvailabilityCache
 }
 
-func NewDefaultProvider(clusterID string, cceapi sdk.CCEAPI, ecsapi sdk.ECSAPI, subnetProvider subnet.Provider) Provider {
+func NewDefaultProvider(clusterID string, cceapi sdk.CCEAPI, ecsapi sdk.ECSAPI, subnetProvider subnet.Provider, offeringAvailabilityCache *utils.OfferingAvailabilityCache) Provider {
 	return &DefaultProvider{
-		clusterID:      clusterID,
-		cceapi:         cceapi,
-		ecsapi:         ecsapi,
-		subnetProvider: subnetProvider,
+		clusterID:                 clusterID,
+		cceapi:                    cceapi,
+		ecsapi:                    ecsapi,
+		subnetProvider:            subnetProvider,
+		offeringAvailabilityCache: offeringAvailabilityCache,
 	}
 }
 
 type createCandidate struct {
 	instanceType *cloudprovider.InstanceType
+	capacityType string
 	price        float64
 	zone         string
 	subnetID     string
 }
 
 func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.ECSNodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, instanceTypes []*cloudprovider.InstanceType) (*Instance, error) {
+	logger := log.FromContext(ctx)
+
 	if p.clusterID == "" {
 		return nil, fmt.Errorf("CCE clusterID is empty")
 	}
@@ -107,7 +114,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.ECSNod
 		if len(allowedInstanceTypes) > 0 && !allowedInstanceTypes.Has(it.Name) {
 			return false
 		}
-		return it.Offerings.Available().HasCompatible(reqs)
+		return len(it.Offerings.Compatible(reqs)) > 0
 	})
 	if len(compatibleInstanceTypes) == 0 {
 		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("no compatible instance types for requirements"))
@@ -124,9 +131,16 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.ECSNod
 	if len(candidates) == 0 {
 		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("no compatible (instanceType, zone, subnet) candidates"))
 	}
+	filteredCandidates, skippedCandidates := p.filterUnavailableCandidates(candidates)
+	if skippedCandidates > 0 {
+		logger.WithValues("skipped", skippedCandidates, "remaining", len(filteredCandidates)).V(1).Info("skipping temporarily unavailable offerings for node creation")
+	}
+	if len(filteredCandidates) == 0 {
+		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("all compatible offerings are temporarily unavailable"))
+	}
 
 	var lastUnavailableErr error
-	for _, c := range candidates {
+	for _, c := range filteredCandidates {
 		resp, err := p.cceapi.CreateNode(&cceMdl.CreateNodeRequest{
 			ClusterId: p.clusterID,
 			Body: &cceMdl.NodeCreateRequest{
@@ -136,7 +150,21 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.ECSNod
 			},
 		})
 		if err != nil {
-			if isInsufficientCapacityError(err) || isUnsupportedNetworkError(err) {
+			if isInsufficientCapacityError(err) {
+				p.offeringAvailabilityCache.MarkUnavailable(c.capacityType, sdk.InstanceType(c.instanceType.Name), c.zone)
+				errorCode, errorMessage := serviceResponseErrorDetails(err)
+				logger.WithValues(
+					"capacity-type", c.capacityType,
+					"instance-type", c.instanceType.Name,
+					"zone", c.zone,
+					"ttl", p.offeringAvailabilityCache.TTL().String(),
+					"error-code", errorCode,
+					"error-message", errorMessage,
+				).V(1).Info("marked offering temporarily unavailable after insufficient capacity")
+				lastUnavailableErr = err
+				continue
+			}
+			if isUnsupportedNetworkError(err) {
 				lastUnavailableErr = err
 				continue
 			}
@@ -169,23 +197,25 @@ func buildCreateCandidates(instanceTypes []*cloudprovider.InstanceType, reqs sch
 	seen := map[string]struct{}{}
 	candidates := make([]createCandidate, 0, len(instanceTypes))
 	for _, it := range instanceTypes {
-		for _, of := range it.Offerings.Available().Compatible(reqs) {
+		for _, of := range it.Offerings.Compatible(reqs) {
 			zoneReq, ok := of.Requirements[corev1.LabelTopologyZone]
 			if !ok || zoneReq.Len() == 0 {
 				continue
 			}
 			zone := zoneReq.Values()[0]
+			capacityType := offeringCapacityType(of)
 			zSubnet, ok := zonalSubnets[zone]
 			if !ok || zSubnet == nil || zSubnet.ID == "" {
 				continue
 			}
-			key := zone + "/" + it.Name
+			key := capacityType + "/" + zone + "/" + it.Name
 			if _, ok := seen[key]; ok {
 				continue
 			}
 			seen[key] = struct{}{}
 			candidates = append(candidates, createCandidate{
 				instanceType: it,
+				capacityType: capacityType,
 				price:        of.Price,
 				zone:         zone,
 				subnetID:     zSubnet.ID,
@@ -202,6 +232,49 @@ func buildCreateCandidates(instanceTypes []*cloudprovider.InstanceType, reqs sch
 		return candidates[i].instanceType.Name < candidates[j].instanceType.Name
 	})
 	return candidates
+}
+
+func (p *DefaultProvider) filterUnavailableCandidates(candidates []createCandidate) ([]createCandidate, int) {
+	if p.offeringAvailabilityCache == nil {
+		return candidates, 0
+	}
+	filtered := make([]createCandidate, 0, len(candidates))
+	skipped := 0
+	for _, candidate := range candidates {
+		if p.offeringAvailabilityCache.IsUnavailable(candidate.capacityType, sdk.InstanceType(candidate.instanceType.Name), candidate.zone) {
+			skipped++
+			continue
+		}
+		filtered = append(filtered, candidate)
+	}
+	return filtered, skipped
+}
+
+func offeringCapacityType(offering *cloudprovider.Offering) string {
+	if offering == nil {
+		return karpv1.CapacityTypeOnDemand
+	}
+	capacityTypeReq, ok := offering.Requirements[karpv1.CapacityTypeLabelKey]
+	if !ok || capacityTypeReq.Len() == 0 {
+		return karpv1.CapacityTypeOnDemand
+	}
+	return capacityTypeReq.Values()[0]
+}
+
+func serviceResponseErrorDetails(err error) (string, string) {
+	var serviceErr *sdkerr.ServiceResponseError
+	if !errors.As(err, &serviceErr) {
+		return "", summarizeErrorMessage(err.Error())
+	}
+	return strings.TrimSpace(serviceErr.ErrorCode), summarizeErrorMessage(serviceErr.ErrorMessage)
+}
+
+func summarizeErrorMessage(msg string) string {
+	msg = strings.Join(strings.Fields(strings.TrimSpace(msg)), " ")
+	if len(msg) <= 160 {
+		return msg
+	}
+	return msg[:157] + "..."
 }
 
 func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.ECSNodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, c createCandidate, osAlias string) *cceMdl.NodeSpec {
