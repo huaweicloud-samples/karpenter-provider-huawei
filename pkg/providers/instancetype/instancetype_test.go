@@ -27,10 +27,12 @@ import (
 	"github.com/patrickmn/go-cache"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
 	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/utils"
 )
 
 func TestFetchInstanceTypes_PaginatesListFlavors(t *testing.T) {
@@ -61,7 +63,7 @@ func TestFetchInstanceTypes_PaginatesListFlavors(t *testing.T) {
 		},
 	}
 
-	p := NewDefaultProvider(fakeAPI, nil, nil, nil, func(sdk.InstanceType) (float64, bool) {
+	p := NewDefaultProvider(fakeAPI, nil, nil, nil, nil, func(sdk.InstanceType) (float64, bool) {
 		return 0, false
 	})
 
@@ -111,6 +113,7 @@ func TestUpdateInstanceTypes_RefreshesFlavorsOnRepeatedCalls(t *testing.T) {
 		fakeAPI,
 		cache.New(time.Minute, time.Minute),
 		cache.New(time.Minute, time.Minute),
+		nil,
 		nil,
 		func(sdk.InstanceType) (float64, bool) { return 0, false },
 	)
@@ -173,6 +176,7 @@ func TestUpdateInstanceTypeOfferings_RefreshesLatestFlavorAvailability(t *testin
 		cache.New(time.Minute, time.Minute),
 		cache.New(time.Minute, time.Minute),
 		nil,
+		nil,
 		func(sdk.InstanceType) (float64, bool) { return 0, false },
 	)
 
@@ -233,6 +237,7 @@ func TestRefresh_UsesSingleFetchPerRefreshAndUpdatesTypesAndOfferings(t *testing
 		fakeAPI,
 		cache.New(time.Minute, time.Minute),
 		cache.New(time.Minute, time.Minute),
+		nil,
 		nil,
 		func(sdk.InstanceType) (float64, bool) { return 0, false },
 	)
@@ -333,7 +338,7 @@ func TestComputeRequirements_UsesSubnetZonesWhenOfferingZonesEmpty(t *testing.T)
 }
 
 func TestCreateOfferings_InjectsOnDemandPrice(t *testing.T) {
-	p := NewDefaultProvider(nil, nil, nil, nil, func(instanceType sdk.InstanceType) (float64, bool) {
+	p := NewDefaultProvider(nil, nil, nil, nil, nil, func(instanceType sdk.InstanceType) (float64, bool) {
 		if instanceType != "c6.large.2" {
 			return 0, false
 		}
@@ -361,7 +366,7 @@ func TestCreateOfferings_InjectsOnDemandPrice(t *testing.T) {
 }
 
 func TestCreateOfferings_UnknownOnDemandPriceUsesMaxFloat(t *testing.T) {
-	p := NewDefaultProvider(nil, nil, nil, nil, func(sdk.InstanceType) (float64, bool) {
+	p := NewDefaultProvider(nil, nil, nil, nil, nil, func(sdk.InstanceType) (float64, bool) {
 		return 0, false
 	})
 	p.instanceTypesOfferings = map[sdk.InstanceType]sets.Set[string]{
@@ -382,6 +387,88 @@ func TestCreateOfferings_UnknownOnDemandPriceUsesMaxFloat(t *testing.T) {
 	}
 	if offerings[0].Price != math.MaxFloat64 {
 		t.Fatalf("expected price %f, got %f", math.MaxFloat64, offerings[0].Price)
+	}
+}
+
+func TestCreateOfferings_UsesUnavailableOfferingCache(t *testing.T) {
+	availabilityCache := utils.NewOfferingAvailabilityCache(time.Minute, time.Minute)
+	availabilityCache.MarkUnavailable(karpv1.CapacityTypeOnDemand, "c6.large.2", "cn-north-4a")
+
+	p := NewDefaultProvider(nil, nil, nil, availabilityCache, nil, func(instanceType sdk.InstanceType) (float64, bool) {
+		if instanceType != "c6.large.2" {
+			return 0, false
+		}
+		return 0.42, true
+	})
+	p.instanceTypesOfferings = map[sdk.InstanceType]sets.Set[string]{
+		"c6.large.2": sets.New[string]("cn-north-4a", "cn-north-4b"),
+	}
+
+	offerings := p.createOfferings(context.Background(), &cloudprovider.InstanceType{
+		Name: "c6.large.2",
+		Requirements: computeRequirements(ecsMdl.Flavor{
+			Name:  "c6.large.2",
+			Ram:   4096,
+			Vcpus: "2",
+		}, "cn-north-4", []string{"cn-north-4a", "cn-north-4b"}, []string{"cn-north-4a", "cn-north-4b"}),
+	}, fakeNodeClass{zones: []string{"cn-north-4a", "cn-north-4b"}}, sets.New[string]("cn-north-4a", "cn-north-4b"))
+
+	if len(offerings) != 2 {
+		t.Fatalf("expected 2 offerings, got %d", len(offerings))
+	}
+
+	availabilityByZone := map[string]bool{}
+	for _, offering := range offerings {
+		zone := offering.Requirements.Get(corev1.LabelTopologyZone).Values()[0]
+		availabilityByZone[zone] = offering.Available
+	}
+
+	if availabilityByZone["cn-north-4a"] {
+		t.Fatalf("expected cn-north-4a offering to be unavailable, got %#v", availabilityByZone)
+	}
+	if !availabilityByZone["cn-north-4b"] {
+		t.Fatalf("expected cn-north-4b offering to remain available, got %#v", availabilityByZone)
+	}
+}
+
+func TestCreateOfferings_UnavailableOfferingCacheExpires(t *testing.T) {
+	availabilityCache := utils.NewOfferingAvailabilityCache(20*time.Millisecond, 5*time.Millisecond)
+	availabilityCache.MarkUnavailable(karpv1.CapacityTypeOnDemand, "c6.large.2", "cn-north-4a")
+
+	p := NewDefaultProvider(nil, nil, nil, availabilityCache, nil, func(instanceType sdk.InstanceType) (float64, bool) {
+		if instanceType != "c6.large.2" {
+			return 0, false
+		}
+		return 0.42, true
+	})
+	p.instanceTypesOfferings = map[sdk.InstanceType]sets.Set[string]{
+		"c6.large.2": sets.New[string]("cn-north-4a"),
+	}
+
+	before := p.createOfferings(context.Background(), &cloudprovider.InstanceType{
+		Name: "c6.large.2",
+		Requirements: computeRequirements(ecsMdl.Flavor{
+			Name:  "c6.large.2",
+			Ram:   4096,
+			Vcpus: "2",
+		}, "cn-north-4", []string{"cn-north-4a"}, []string{"cn-north-4a"}),
+	}, fakeNodeClass{zones: []string{"cn-north-4a"}}, sets.New[string]("cn-north-4a"))
+	if len(before) != 1 || before[0].Available {
+		t.Fatalf("expected offering to be unavailable before ttl expiry, got %#v", before)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	after := p.createOfferings(context.Background(), &cloudprovider.InstanceType{
+		Name: "c6.large.2",
+		Requirements: computeRequirements(ecsMdl.Flavor{
+			Name:  "c6.large.2",
+			Ram:   4096,
+			Vcpus: "2",
+		}, "cn-north-4", []string{"cn-north-4a"}, []string{"cn-north-4a"}),
+	}, fakeNodeClass{zones: []string{"cn-north-4a"}}, sets.New[string]("cn-north-4a"))
+	if len(after) != 1 || !after[0].Available {
+		t.Fatalf("expected offering to recover after ttl expiry, got %#v", after)
 	}
 }
 

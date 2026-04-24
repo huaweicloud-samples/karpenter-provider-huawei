@@ -40,6 +40,7 @@ import (
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
 	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/utils"
 )
 
 const listFlavorsPageSize int32 = 1000
@@ -67,27 +68,30 @@ type DefaultProvider struct {
 	instanceTypesOfferings map[sdk.InstanceType]sets.Set[string]
 	allZones               sets.Set[string]
 
-	instanceTypesCache      *cache.Cache
-	discoveredCapacityCache *cache.Cache
-	cm                      *pretty.ChangeMonitor
+	instanceTypesCache        *cache.Cache
+	discoveredCapacityCache   *cache.Cache
+	offeringAvailabilityCache *utils.OfferingAvailabilityCache
+	cm                        *pretty.ChangeMonitor
 }
 
 func NewDefaultProvider(
 	ecsapi sdk.ECSAPI,
 	instanceTypesCache *cache.Cache,
 	discoveredCapacityCache *cache.Cache,
+	offeringAvailabilityCache *utils.OfferingAvailabilityCache,
 	instanceTypesResolver Resolver,
 	onDemandPrice func(sdk.InstanceType) (float64, bool),
 ) *DefaultProvider {
 	return &DefaultProvider{
-		ecsapi:                  ecsapi,
-		instanceTypesInfo:       map[sdk.InstanceType]ecsMdl.Flavor{},
-		instanceTypesOfferings:  map[sdk.InstanceType]sets.Set[string]{},
-		instanceTypesResolver:   instanceTypesResolver,
-		instanceTypesCache:      instanceTypesCache,
-		discoveredCapacityCache: discoveredCapacityCache,
-		onDemandPrice:           onDemandPrice,
-		cm:                      pretty.NewChangeMonitor(),
+		ecsapi:                    ecsapi,
+		instanceTypesInfo:         map[sdk.InstanceType]ecsMdl.Flavor{},
+		instanceTypesOfferings:    map[sdk.InstanceType]sets.Set[string]{},
+		instanceTypesResolver:     instanceTypesResolver,
+		instanceTypesCache:        instanceTypesCache,
+		discoveredCapacityCache:   discoveredCapacityCache,
+		offeringAvailabilityCache: offeringAvailabilityCache,
+		onDemandPrice:             onDemandPrice,
+		cm:                        pretty.NewChangeMonitor(),
 	}
 }
 
@@ -265,8 +269,12 @@ func (p *DefaultProvider) createOfferings(
 	offerings := make(cloudprovider.Offerings, 0, len(zones)*len(capacityTypes))
 	for _, zone := range zones {
 		for _, capacityType := range capacityTypes {
+			available := true
+			if p.offeringAvailabilityCache != nil && p.offeringAvailabilityCache.IsUnavailable(capacityType, sdk.InstanceType(it.Name), zone) {
+				available = false
+			}
 			offerings = append(offerings, &cloudprovider.Offering{
-				Available: true,
+				Available: available,
 				Price:     p.offeringPrice(capacityType, sdk.InstanceType(it.Name)),
 				Requirements: scheduling.NewRequirements(
 					scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType),

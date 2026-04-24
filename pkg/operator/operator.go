@@ -41,6 +41,7 @@ import (
 	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/subnet"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/version"
+	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/utils"
 )
 
 const (
@@ -55,6 +56,8 @@ const (
 	AvailableIPAddressTTL = 5 * time.Minute
 	// InstanceTypesZonesAndOfferingsTTL is the time before we refresh instance types, zones, and offerings at EC2
 	InstanceTypesZonesAndOfferingsTTL = 5 * time.Minute
+	// UnavailableOfferingTTL is the duration to suppress recently sold-out offerings from scheduling.
+	UnavailableOfferingTTL = 5 * time.Minute
 	// if it is not updated by a node creation event or refreshed during controller reconciliation
 	DiscoveredCapacityCacheTTL = 60 * 24 * time.Hour
 	BillingEndpoint            = "https://bss.myhuaweicloud.com"
@@ -123,12 +126,14 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	ecsApi := sdk.NewECSService(ecsReg, credentials, config.DefaultHttpConfig())
 	bssApi := sdk.NewBSSService(billingRegion(reg), globalCredentials, config.DefaultHttpConfig())
 	cceApi := sdk.NewCCEService(cceReg, credentials, config.DefaultHttpConfig())
-	instanceProvider := instance.NewDefaultProvider(clusterID, cceApi, ecsApi, subnetProvider)
+	unavailableOfferingCache := utils.NewOfferingAvailabilityCache(UnavailableOfferingTTL, DefaultCleanupInterval)
+	instanceProvider := instance.NewDefaultProvider(clusterID, cceApi, ecsApi, subnetProvider, unavailableOfferingCache)
 	pricingProvider := pricing.NewDefaultProvider(bssApi, reg, func() string { return credentials.ProjectId })
 	instanceTypeProvider := instancetype.NewDefaultProvider(
 		ecsApi,
 		cache.New(InstanceTypesZonesAndOfferingsTTL, DefaultCleanupInterval),
 		cache.New(DiscoveredCapacityCacheTTL, DefaultCleanupInterval),
+		unavailableOfferingCache,
 		instancetype.NewDefaultResolver(reg),
 		pricingProvider.OnDemandPrice,
 	)
