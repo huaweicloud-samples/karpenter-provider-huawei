@@ -3,6 +3,11 @@ builds:
     main: ./cmd/controller
     env:
       - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
 
 archives: []
 
