@@ -247,14 +247,17 @@ func (p *DefaultProvider) createOfferings(
 	allZones sets.Set[string],
 ) cloudprovider.Offerings {
 	_ = ctx
-	_ = allZones
-
-	subnetZones := sets.New(nodeClass.Zones()...)
 	offeringZones := p.instanceTypesOfferings[sdk.InstanceType(it.Name)]
 
 	availableZones := sets.New[string](it.Requirements.Get(corev1.LabelTopologyZone).Values()...)
 	if len(availableZones) == 0 {
-		availableZones = offeringZones.Intersection(subnetZones)
+		if offeringZones.Len() != 0 {
+			availableZones = offeringZones
+		} else if allZones.Len() != 0 {
+			availableZones = allZones
+		} else {
+			availableZones = sets.New(nodeClass.Zones()...)
+		}
 	}
 
 	capacityTypes := it.Requirements.Get(karpv1.CapacityTypeLabelKey).Values()

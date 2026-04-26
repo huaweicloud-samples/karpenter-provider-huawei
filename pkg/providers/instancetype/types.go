@@ -120,18 +120,18 @@ func NewInstanceType(
 
 func computeRequirements(info ecsMdl.Flavor, region string, offeringZones []string, subnetZones []string) scheduling.Requirements {
 	capacityTypes := []string{ChargeTypeOnDemand}
-	// Available zones is the set intersection between zones where the instance type is available, and zones which are
-	// available via the provided ECSNodeClass.
-	availableZones := sets.New(offeringZones...).Intersection(sets.New(subnetZones...))
-	if len(offeringZones) == 0 {
+	// availableZones is the set of zones where the instance type is offered. subnetZones are informational and only
+	// used as a fallback when offerings don't include explicit zone information.
+	availableZones := sets.New(offeringZones...)
+	if availableZones.Len() == 0 {
 		availableZones = sets.New(subnetZones...)
 	}
+
 	requirements := scheduling.NewRequirements(
 		// Well Known Upstream
 		scheduling.NewRequirement(corev1.LabelInstanceTypeStable, corev1.NodeSelectorOpIn, info.Name),
 		scheduling.NewRequirement(corev1.LabelArchStable, corev1.NodeSelectorOpIn, getArchitecture(info)),
 		scheduling.NewRequirement(corev1.LabelOSStable, corev1.NodeSelectorOpIn, string(corev1.Linux)),
-		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, availableZones.UnsortedList()...),
 		scheduling.NewRequirement(corev1.LabelTopologyRegion, corev1.NodeSelectorOpIn, region),
 		scheduling.NewRequirement(corev1.LabelWindowsBuild, corev1.NodeSelectorOpDoesNotExist),
 		// Well Known to Karpenter
@@ -146,6 +146,9 @@ func computeRequirements(info ecsMdl.Flavor, region string, offeringZones []stri
 		scheduling.NewRequirement(v1alpha1.LabelInstanceGPUCount, corev1.NodeSelectorOpDoesNotExist),
 		scheduling.NewRequirement(v1alpha1.LabelInstanceGPUMemory, corev1.NodeSelectorOpDoesNotExist),
 	)
+	if availableZones.Len() != 0 {
+		requirements.Add(scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, availableZones.UnsortedList()...))
+	}
 	return requirements
 }
 

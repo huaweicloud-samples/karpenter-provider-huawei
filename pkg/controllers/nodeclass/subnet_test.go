@@ -96,3 +96,51 @@ func TestSubnetReconcilerMarksSubnetsNotReadyWhenZoneCannotBeResolved(t *testing
 		t.Fatalf("expected unresolved zone condition, got %#v", condition)
 	}
 }
+
+func TestSubnetReconcilerExpandsSubnetAcrossObservedZones(t *testing.T) {
+	if err := corev1.AddToScheme(clientgoscheme.Scheme); err != nil {
+		t.Fatalf("adding core scheme: %v", err)
+	}
+	kubeClient := fake.NewClientBuilder().WithScheme(clientgoscheme.Scheme).WithObjects(
+		&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node-a",
+				Labels: map[string]string{
+					subnetIDLabelKey:         "subnet-123",
+					corev1.LabelTopologyZone: "zone-a",
+				},
+			},
+		},
+		&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node-b",
+				Labels: map[string]string{
+					subnetIDLabelKey:         "subnet-123",
+					corev1.LabelTopologyZone: "zone-b",
+				},
+			},
+		},
+	).Build()
+	reconciler := NewSubnetReconciler(kubeClient, &stubSubnetProvider{
+		subnets: []vpcMdl.Subnet{
+			{Id: "subnet-123", AvailabilityZone: "", AvailableIpAddressCount: 10},
+		},
+	})
+	nodeClass := &v1alpha1.ECSNodeClass{}
+
+	if _, err := reconciler.Reconcile(context.Background(), nodeClass); err != nil {
+		t.Fatalf("reconciling subnet status: %v", err)
+	}
+	if len(nodeClass.Status.Subnets) != 2 {
+		t.Fatalf("expected 2 resolved subnet entries, got %d", len(nodeClass.Status.Subnets))
+	}
+	if got := nodeClass.Status.Subnets[0]; got.ID != "subnet-123" || got.Zone != "zone-a" {
+		t.Fatalf("expected first subnet entry subnet-123/zone-a, got %#v", got)
+	}
+	if got := nodeClass.Status.Subnets[1]; got.ID != "subnet-123" || got.Zone != "zone-b" {
+		t.Fatalf("expected second subnet entry subnet-123/zone-b, got %#v", got)
+	}
+	if condition := nodeClass.StatusConditions().Get(v1alpha1.ConditionTypeSubnetsReady); !condition.IsTrue() {
+		t.Fatalf("expected subnets ready condition to be true, got %#v", condition)
+	}
+}

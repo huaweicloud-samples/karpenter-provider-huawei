@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/awslabs/operatorpkg/serrors"
@@ -28,6 +29,7 @@ import (
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
 	"sigs.k8s.io/karpenter/pkg/cloudprovider"
@@ -156,40 +158,82 @@ func (p *DefaultProvider) ZonalSubnetsForLaunch(ctx context.Context, nodeClass *
 
 	p.Lock()
 	defer p.Unlock()
-	zonalSubnets := map[string]*Subnet{}
+
 	availableIPAddressCount := map[string]int32{}
 	for _, subnet := range nodeClass.Status.Subnets {
 		if subnetAvailableIP, ok := p.availableIPAddressCache.Get(subnet.ID); ok {
 			availableIPAddressCount[subnet.ID] = subnetAvailableIP.(int32)
 		}
 	}
-	for _, subnet := range nodeClass.Status.Subnets {
-		if v, ok := zonalSubnets[subnet.Zone]; ok {
-			currentZonalSubnetIPAddressCount := v.AvailableIPAddressCount
-			newZonalSubnetIPAddressCount := availableIPAddressCount[subnet.ID]
-			if ips, ok := p.inflightIPs[v.ID]; ok {
-				currentZonalSubnetIPAddressCount = ips
-			}
-			if ips, ok := p.inflightIPs[subnet.ID]; ok {
-				newZonalSubnetIPAddressCount = ips
-			}
 
-			if currentZonalSubnetIPAddressCount >= newZonalSubnetIPAddressCount {
+	// Select the subnet with the most available IPs. Subnet zones are treated as informational; the chosen subnet is
+	// considered a candidate for all zones where the instance types have compatible offerings.
+	selectedSubnetID := ""
+	var selectedSubnetAvailableIPs int32 = -1
+	for _, subnet := range nodeClass.Status.Subnets {
+		ipCount := availableIPAddressCount[subnet.ID]
+		if ips, ok := p.inflightIPs[subnet.ID]; ok {
+			ipCount = ips
+		}
+		if selectedSubnetID == "" || ipCount > selectedSubnetAvailableIPs {
+			selectedSubnetID = subnet.ID
+			selectedSubnetAvailableIPs = ipCount
+		}
+	}
+	if selectedSubnetID == "" {
+		return nil, fmt.Errorf("no subnets matched selector %v", nodeClass.Spec.SubnetSelectorTerms)
+	}
+
+	zones := sets.New[string]()
+	for _, it := range instanceTypes {
+		for _, of := range it.Offerings {
+			if !of.Requirements.Get(karpv1.CapacityTypeLabelKey).Has(capacityType) {
 				continue
 			}
+			zone := strings.TrimSpace(of.Requirements.Get(corev1.LabelTopologyZone).Any())
+			if zone == "" {
+				continue
+			}
+			zones.Insert(zone)
 		}
-		zonalSubnets[subnet.Zone] = &Subnet{ID: subnet.ID, Zone: subnet.Zone, AvailableIPAddressCount: availableIPAddressCount[subnet.ID]}
 	}
-	for _, subnet := range zonalSubnets {
+	// Fallback to the discovered subnet zones if offerings don't yield any zones.
+	if zones.Len() == 0 {
+		for _, subnet := range nodeClass.Status.Subnets {
+			zone := strings.TrimSpace(subnet.Zone)
+			if zone == "" {
+				continue
+			}
+			zones.Insert(zone)
+		}
+	}
+
+	zonalSubnets := map[string]*Subnet{}
+	for zone := range zones {
+		zonalSubnets[zone] = &Subnet{
+			ID:                      selectedSubnetID,
+			Zone:                    zone,
+			AvailableIPAddressCount: selectedSubnetAvailableIPs,
+		}
+	}
+
+	// Reserve inflight IPs once per subnet (by ID) using the maximum predicted usage across all candidate zones.
+	maxPredictedIPsUsed := int32(0)
+	for zone := range zones {
 		predictedIPsUsed := p.minPods(instanceTypes, scheduling.NewRequirements(
 			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType),
-			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, subnet.Zone),
+			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
 		))
-		prevIPs := subnet.AvailableIPAddressCount
-		if trackedIPs, ok := p.inflightIPs[subnet.ID]; ok {
+		if predictedIPsUsed > maxPredictedIPsUsed {
+			maxPredictedIPsUsed = predictedIPsUsed
+		}
+	}
+	if maxPredictedIPsUsed > 0 {
+		prevIPs := selectedSubnetAvailableIPs
+		if trackedIPs, ok := p.inflightIPs[selectedSubnetID]; ok {
 			prevIPs = trackedIPs
 		}
-		p.inflightIPs[subnet.ID] = prevIPs - predictedIPsUsed
+		p.inflightIPs[selectedSubnetID] = prevIPs - maxPredictedIPsUsed
 	}
 	return zonalSubnets, nil
 }
@@ -204,31 +248,48 @@ func (p *DefaultProvider) UpdateInflightIPs(request *cms.CreateAutoLaunchGroupRe
 	p.Lock()
 	defer p.Unlock()
 
+	zonesBySubnetID := map[string]sets.Set[string]{}
 	for _, subnet := range subnets {
-		if subnet == nil {
+		if subnet == nil || subnet.ID == "" {
 			continue
 		}
-		reserved := p.minPods(instanceTypes, scheduling.NewRequirements(
-			scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType),
-			scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, subnet.Zone),
-		))
-		if reserved == 0 {
+		if _, ok := zonesBySubnetID[subnet.ID]; !ok {
+			zonesBySubnetID[subnet.ID] = sets.New[string]()
+		}
+		if zone := strings.TrimSpace(subnet.Zone); zone != "" {
+			zonesBySubnetID[subnet.ID].Insert(zone)
+		}
+	}
+
+	for subnetID, zones := range zonesBySubnetID {
+		maxReserved := int32(0)
+		for zone := range zones {
+			reserved := p.minPods(instanceTypes, scheduling.NewRequirements(
+				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType),
+				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
+			))
+			if reserved > maxReserved {
+				maxReserved = reserved
+			}
+		}
+		if maxReserved == 0 {
 			continue
 		}
-		current, ok := p.inflightIPs[subnet.ID]
+
+		current, ok := p.inflightIPs[subnetID]
 		if !ok {
 			continue
 		}
-		updated := current + reserved
+		updated := current + maxReserved
 
-		if baselineValue, ok := p.availableIPAddressCache.Get(subnet.ID); ok {
+		if baselineValue, ok := p.availableIPAddressCache.Get(subnetID); ok {
 			baseline := baselineValue.(int32)
 			if updated >= baseline {
-				delete(p.inflightIPs, subnet.ID)
+				delete(p.inflightIPs, subnetID)
 				continue
 			}
 		}
-		p.inflightIPs[subnet.ID] = updated
+		p.inflightIPs[subnetID] = updated
 	}
 }
 
