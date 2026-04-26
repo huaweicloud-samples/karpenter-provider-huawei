@@ -67,15 +67,26 @@ func (s *Subnet) Reconcile(ctx context.Context, nodeClass *v1alpha1.ECSNodeClass
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("resolving subnet zones from nodes, %w", err)
 	}
-	nodeClass.Status.Subnets = lo.Map(subnets, func(subnet vpcMdl.Subnet, _ int) v1alpha1.Subnet {
+	nodeClass.Status.Subnets = lo.FlatMap(subnets, func(subnet vpcMdl.Subnet, _ int) []v1alpha1.Subnet {
 		zone := strings.TrimSpace(subnet.AvailabilityZone)
-		if zone == "" {
-			zone = subnetZones[subnet.Id]
+		if zone != "" {
+			return []v1alpha1.Subnet{{
+				ID:   subnet.Id,
+				Zone: zone,
+			}}
 		}
-		return v1alpha1.Subnet{
+		if zones := subnetZones[subnet.Id]; len(zones) > 0 {
+			return lo.Map(zones, func(zone string, _ int) v1alpha1.Subnet {
+				return v1alpha1.Subnet{
+					ID:   subnet.Id,
+					Zone: zone,
+				}
+			})
+		}
+		return []v1alpha1.Subnet{{
 			ID:   subnet.Id,
-			Zone: zone,
-		}
+			Zone: "",
+		}}
 	})
 	if unresolved := lo.Filter(nodeClass.Status.Subnets, func(subnet v1alpha1.Subnet, _ int) bool {
 		return strings.TrimSpace(subnet.Zone) == ""
@@ -91,15 +102,15 @@ func (s *Subnet) Reconcile(ctx context.Context, nodeClass *v1alpha1.ECSNodeClass
 	return reconcile.Result{RequeueAfter: time.Minute}, nil
 }
 
-func (s *Subnet) subnetZonesFromNodes(ctx context.Context) (map[string]string, error) {
+func (s *Subnet) subnetZonesFromNodes(ctx context.Context) (map[string][]string, error) {
 	if s.kubeClient == nil {
-		return map[string]string{}, nil
+		return map[string][]string{}, nil
 	}
 	nodes := &corev1.NodeList{}
 	if err := s.kubeClient.List(ctx, nodes); err != nil {
 		return nil, err
 	}
-	zones := map[string]string{}
+	zones := map[string]map[string]struct{}{}
 	for _, node := range nodes.Items {
 		subnetID := strings.TrimSpace(node.Labels[subnetIDLabelKey])
 		if subnetID == "" {
@@ -112,10 +123,15 @@ func (s *Subnet) subnetZonesFromNodes(ctx context.Context) (map[string]string, e
 		if zone == "" {
 			continue
 		}
-		if existing, ok := zones[subnetID]; ok && existing != zone {
-			return nil, fmt.Errorf("conflicting zones for subnet %s: %s vs %s", subnetID, existing, zone)
+		if _, ok := zones[subnetID]; !ok {
+			zones[subnetID] = map[string]struct{}{}
 		}
-		zones[subnetID] = zone
+		zones[subnetID][zone] = struct{}{}
 	}
-	return zones, nil
+	resolved := map[string][]string{}
+	for subnetID, zoneSet := range zones {
+		resolved[subnetID] = lo.Keys(zoneSet)
+		sort.Strings(resolved[subnetID])
+	}
+	return resolved, nil
 }
