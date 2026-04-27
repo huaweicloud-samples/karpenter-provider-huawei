@@ -1,10 +1,10 @@
 apiVersion: karpenter.k8s.huawei/v1alpha1
-kind: ECSNodeClass
+kind: CCENodeClass
 metadata:
   labels:
     app.kubernetes.io/name: karpenter-provider-huawei
     app.kubernetes.io/managed-by: kustomize
-  name: ecsnodeclass-sample
+  name: ccenodeclass-sample
 spec:
   subnetSelectorTerms:
     - id: 323e4567-e89b-12d3-a456-426614174000

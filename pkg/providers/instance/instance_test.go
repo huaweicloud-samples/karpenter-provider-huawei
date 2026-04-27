@@ -240,8 +240,8 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 	userVolumeSize := int32(100)
 	ecsGroupID := "46ebaf04-ca42-48ca-8057-0b96e6126e1b"
 	provider := &DefaultProvider{}
-	nodeClass := &v1alpha1.ECSNodeClass{
-		Spec: v1alpha1.ECSNodeClassSpec{
+	nodeClass := &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
 			ECSGroupID:  &ecsGroupID,
 			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "HCE OS 2.0"},
 			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
@@ -529,11 +529,11 @@ func (s *stubSubnetProvider) LivenessProbe(*http.Request) error {
 	return nil
 }
 
-func (s *stubSubnetProvider) List(context.Context, *v1alpha1.ECSNodeClass) ([]vpcMdl.Subnet, error) {
+func (s *stubSubnetProvider) List(context.Context, *v1alpha1.CCENodeClass) ([]vpcMdl.Subnet, error) {
 	return nil, nil
 }
 
-func (s *stubSubnetProvider) ZonalSubnetsForLaunch(context.Context, *v1alpha1.ECSNodeClass, []*cloudprovider.InstanceType, string) (map[string]*subnet.Subnet, error) {
+func (s *stubSubnetProvider) ZonalSubnetsForLaunch(context.Context, *v1alpha1.CCENodeClass, []*cloudprovider.InstanceType, string) (map[string]*subnet.Subnet, error) {
 	return s.zonalSubnets, nil
 }
 
@@ -561,8 +561,8 @@ func TestCreate_AllowsEmptyServerIDInCreateNodeResponse(t *testing.T) {
 			},
 		},
 	}
-	nodeClass := &v1alpha1.ECSNodeClass{
-		Spec: v1alpha1.ECSNodeClassSpec{
+	nodeClass := &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
 			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
 			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
 				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
@@ -571,7 +571,7 @@ func TestCreate_AllowsEmptyServerIDInCreateNodeResponse(t *testing.T) {
 				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
 			},
 		},
-		Status: v1alpha1.ECSNodeClassStatus{
+		Status: v1alpha1.CCENodeClassStatus{
 			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "zone-a"}},
 		},
 	}
@@ -623,8 +623,8 @@ func TestCreate_PrefersCheaperCandidate(t *testing.T) {
 			},
 		},
 	}
-	nodeClass := &v1alpha1.ECSNodeClass{
-		Spec: v1alpha1.ECSNodeClassSpec{
+	nodeClass := &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
 			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
 			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
 				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
@@ -633,7 +633,7 @@ func TestCreate_PrefersCheaperCandidate(t *testing.T) {
 				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
 			},
 		},
-		Status: v1alpha1.ECSNodeClassStatus{
+		Status: v1alpha1.CCENodeClassStatus{
 			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "ap-southeast-3a"}},
 		},
 	}
@@ -724,8 +724,8 @@ func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T
 			},
 		},
 	}
-	nodeClass := &v1alpha1.ECSNodeClass{
-		Spec: v1alpha1.ECSNodeClassSpec{
+	nodeClass := &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
 			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
 			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
 				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
@@ -734,7 +734,7 @@ func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T
 				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
 			},
 		},
-		Status: v1alpha1.ECSNodeClassStatus{
+		Status: v1alpha1.CCENodeClassStatus{
 			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "ap-southeast-3a"}},
 		},
 	}
@@ -942,9 +942,9 @@ func TestCreate_UnavailableOfferingCacheIsZoneScoped(t *testing.T) {
 	}
 }
 
-func newTestNodeClass() *v1alpha1.ECSNodeClass {
-	return &v1alpha1.ECSNodeClass{
-		Spec: v1alpha1.ECSNodeClassSpec{
+func newTestNodeClass() *v1alpha1.CCENodeClass {
+	return &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
 			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
 			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
 				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
@@ -953,7 +953,7 @@ func newTestNodeClass() *v1alpha1.ECSNodeClass {
 				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
 			},
 		},
-		Status: v1alpha1.ECSNodeClassStatus{
+		Status: v1alpha1.CCENodeClassStatus{
 			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "ap-southeast-3a"}},
 		},
 	}

@@ -18,14 +18,14 @@ package v1alpha1
 
 import "testing"
 
-func TestECSNodeClassHash(t *testing.T) {
+func TestCCENodeClassHash(t *testing.T) {
 	rootIOPS := int32(3000)
 	rootThroughput := int32(125)
 	userVolumeSize := int32(100)
 	ecsGroupID := "46ebaf04-ca42-48ca-8057-0b96e6126e1b"
 
-	base := &ECSNodeClass{
-		Spec: ECSNodeClassSpec{
+	base := &CCENodeClass{
+		Spec: CCENodeClassSpec{
 			ECSGroupID:          &ecsGroupID,
 			SubnetSelectorTerms: []SubnetSelectorTerm{{ID: "123e4567-e89b-12d3-a456-426614174000"}},
 			IMSSelector:         IMSSelector{IMSFamily: "HCE OS 2.0"},
@@ -109,8 +109,8 @@ func TestECSNodeClassHash(t *testing.T) {
 	})
 }
 
-func TestECSNodeClassSpecValidateForCreateNode(t *testing.T) {
-	valid := ECSNodeClassSpec{
+func TestCCENodeClassSpecValidateForCreateNode(t *testing.T) {
+	valid := CCENodeClassSpec{
 		IMSSelector: IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
 		BlockDeviceMappings: BlockDeviceMappings{
 			Root: BlockDevice{

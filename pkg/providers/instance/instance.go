@@ -52,7 +52,7 @@ const (
 )
 
 type Provider interface {
-	Create(context.Context, *v1alpha1.ECSNodeClass, *karpv1.NodeClaim, map[string]string, []*cloudprovider.InstanceType) (*Instance, error)
+	Create(context.Context, *v1alpha1.CCENodeClass, *karpv1.NodeClaim, map[string]string, []*cloudprovider.InstanceType) (*Instance, error)
 	Get(context.Context, string) (*Instance, error)
 	List(context.Context) ([]*Instance, error)
 	Delete(context.Context, string) error
@@ -85,7 +85,7 @@ type createCandidate struct {
 	subnetID     string
 }
 
-func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.ECSNodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, instanceTypes []*cloudprovider.InstanceType) (*Instance, error) {
+func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.CCENodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, instanceTypes []*cloudprovider.InstanceType) (*Instance, error) {
 	logger := log.FromContext(ctx)
 
 	if p.clusterID == "" {
@@ -277,7 +277,7 @@ func summarizeErrorMessage(msg string) string {
 	return msg[:157] + "..."
 }
 
-func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.ECSNodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, c createCandidate, osAlias string) *cceMdl.NodeSpec {
+func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.CCENodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, c createCandidate, osAlias string) *cceMdl.NodeSpec {
 	rootVolume := resolveRootVolume(nodeClass)
 	dataVolumes := resolveDataVolumes(nodeClass, rootVolume.Volumetype)
 	login := resolveLogin(nodeClass)
@@ -315,11 +315,11 @@ func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.ECSNodeClass,
 	return spec
 }
 
-func resolveRootVolume(nodeClass *v1alpha1.ECSNodeClass) *cceMdl.Volume {
+func resolveRootVolume(nodeClass *v1alpha1.CCENodeClass) *cceMdl.Volume {
 	return toCCEVolume(&nodeClass.Spec.BlockDeviceMappings.Root)
 }
 
-func resolveDataVolumes(nodeClass *v1alpha1.ECSNodeClass, rootVolumeType string) *[]cceMdl.Volume {
+func resolveDataVolumes(nodeClass *v1alpha1.CCENodeClass, rootVolumeType string) *[]cceMdl.Volume {
 	volumes := make([]cceMdl.Volume, 0, 1+len(nodeClass.Spec.BlockDeviceMappings.Users))
 	if nodeClass.Spec.BlockDeviceMappings.K8S != nil {
 		volumes = append(volumes, *toCCEVolume(nodeClass.Spec.BlockDeviceMappings.K8S))
@@ -358,7 +358,7 @@ func toCCEVolume(device *v1alpha1.BlockDevice) *cceMdl.Volume {
 	}
 }
 
-func resolveLogin(nodeClass *v1alpha1.ECSNodeClass) *cceMdl.Login {
+func resolveLogin(nodeClass *v1alpha1.CCENodeClass) *cceMdl.Login {
 	if nodeClass == nil || strings.TrimSpace(nodeClass.Spec.Login.UserPassword.Password) == "" {
 		return nil
 	}
@@ -374,7 +374,7 @@ func resolveLogin(nodeClass *v1alpha1.ECSNodeClass) *cceMdl.Login {
 	}
 }
 
-func resolveRuntime(nodeClass *v1alpha1.ECSNodeClass) *cceMdl.Runtime {
+func resolveRuntime(nodeClass *v1alpha1.CCENodeClass) *cceMdl.Runtime {
 	if nodeClass.Spec.RuntimeConfiguration == nil {
 		return nil
 	}
@@ -390,7 +390,7 @@ func resolveRuntime(nodeClass *v1alpha1.ECSNodeClass) *cceMdl.Runtime {
 	return &cceMdl.Runtime{Name: &runtimeName}
 }
 
-func resolveECSGroupID(nodeClass *v1alpha1.ECSNodeClass) *string {
+func resolveECSGroupID(nodeClass *v1alpha1.CCENodeClass) *string {
 	if nodeClass.Spec.ECSGroupID == nil {
 		return nil
 	}

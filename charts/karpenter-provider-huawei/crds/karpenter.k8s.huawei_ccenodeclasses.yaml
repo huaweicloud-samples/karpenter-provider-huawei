@@ -4,20 +4,20 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.0
-  name: ecsnodeclasses.karpenter.k8s.huawei
+  name: ccenodeclasses.karpenter.k8s.huawei
 spec:
   group: karpenter.k8s.huawei
   names:
-    kind: ECSNodeClass
-    listKind: ECSNodeClassList
-    plural: ecsnodeclasses
-    singular: ecsnodeclass
+    kind: CCENodeClass
+    listKind: CCENodeClassList
+    plural: ccenodeclasses
+    singular: ccenodeclass
   scope: Cluster
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: ECSNodeClass is the Schema for the ecsnodeclasses API
+        description: CCENodeClass is the Schema for the ccenodeclasses API
         properties:
           apiVersion:
             description: |-
@@ -37,7 +37,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of ECSNodeClass
+            description: spec defines the desired state of CCENodeClass
             properties:
               blockDeviceMappings:
                 description: BlockDeviceMappings defines the root, k8s, and user data
@@ -330,7 +330,7 @@ spec:
             - subnetSelectorTerms
             type: object
           status:
-            description: status defines the observed state of ECSNodeClass
+            description: status defines the observed state of CCENodeClass
             properties:
               conditions:
                 description: Conditions contains signals for health and readiness

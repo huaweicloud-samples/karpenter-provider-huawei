@@ -47,7 +47,7 @@ func NewSubnetReconciler(kubeClient client.Client, subnetProvider subnet.Provide
 	}
 }
 
-func (s *Subnet) Reconcile(ctx context.Context, nodeClass *v1alpha1.ECSNodeClass) (reconcile.Result, error) {
+func (s *Subnet) Reconcile(ctx context.Context, nodeClass *v1alpha1.CCENodeClass) (reconcile.Result, error) {
 	subnets, err := s.subnetProvider.List(ctx, nodeClass)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("getting subnets, %w", err)

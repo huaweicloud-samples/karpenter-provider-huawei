@@ -132,8 +132,8 @@ func (c *CloudProvider) Create(ctx context.Context, nodeClaim *karpv1.NodeClaim)
 			Annotations: map[string]string{
 				v1alpha1.AnnotationNodeID:                  createdInstance.NodeID,
 				v1alpha1.AnnotationInstanceID:              createdInstance.ServerID,
-				v1alpha1.AnnotationECSNodeClassHash:        nodeClass.Hash(),
-				v1alpha1.AnnotationECSNodeClassHashVersion: v1alpha1.ECSNodeClassHashVersion,
+				v1alpha1.AnnotationCCENodeClassHash:        nodeClass.Hash(),
+				v1alpha1.AnnotationCCENodeClassHashVersion: v1alpha1.CCENodeClassHashVersion,
 			},
 		},
 		Status: karpv1.NodeClaimStatus{
@@ -299,11 +299,11 @@ func (c *CloudProvider) Name() string {
 
 // GetSupportedNodeClasses returns the NodeClass types supported by this provider.
 func (c *CloudProvider) GetSupportedNodeClasses() []status.Object {
-	return []status.Object{&v1alpha1.ECSNodeClass{}}
+	return []status.Object{&v1alpha1.CCENodeClass{}}
 }
 
-func (c *CloudProvider) resolveNodeClassFromNodeClaim(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*v1alpha1.ECSNodeClass, error) {
-	nodeClass := &v1alpha1.ECSNodeClass{}
+func (c *CloudProvider) resolveNodeClassFromNodeClaim(ctx context.Context, nodeClaim *karpv1.NodeClaim) (*v1alpha1.CCENodeClass, error) {
+	nodeClass := &v1alpha1.CCENodeClass{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodeClaim.Spec.NodeClassRef.Name}, nodeClass); err != nil {
 		return nil, err
 	}
@@ -315,8 +315,8 @@ func (c *CloudProvider) resolveNodeClassFromNodeClaim(ctx context.Context, nodeC
 	return nodeClass, nil
 }
 
-func (c *CloudProvider) resolveNodeClassFromNodePool(ctx context.Context, nodePool *karpv1.NodePool) (*v1alpha1.ECSNodeClass, error) {
-	nodeClass := &v1alpha1.ECSNodeClass{}
+func (c *CloudProvider) resolveNodeClassFromNodePool(ctx context.Context, nodePool *karpv1.NodePool) (*v1alpha1.CCENodeClass, error) {
+	nodeClass := &v1alpha1.CCENodeClass{}
 	if err := c.kubeClient.Get(ctx, types.NamespacedName{Name: nodePool.Spec.Template.Spec.NodeClassRef.Name}, nodeClass); err != nil {
 		return nil, err
 	}
@@ -330,13 +330,13 @@ func (c *CloudProvider) resolveNodeClassFromNodePool(ctx context.Context, nodePo
 
 // newTerminatingNodeClassError returns a NotFound error for handling by
 func newTerminatingNodeClassError(name string) *errors.StatusError {
-	qualifiedResource := schema.GroupResource{Group: apis.Group, Resource: "ecsnodeclasses"}
+	qualifiedResource := schema.GroupResource{Group: apis.Group, Resource: "ccenodeclasses"}
 	err := errors.NewNotFound(qualifiedResource, name)
 	err.ErrStatus.Message = fmt.Sprintf("%s %q is terminating, treating as not found", qualifiedResource.String(), name)
 	return err
 }
 
-func (c *CloudProvider) isNodeClassDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ECSNodeClass) (cloudprovider.DriftReason, error) {
+func (c *CloudProvider) isNodeClassDrifted(ctx context.Context, nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.CCENodeClass) (cloudprovider.DriftReason, error) {
 	if drifted := c.areStaticFieldsDrifted(nodeClaim, nodeClass); drifted != "" {
 		return drifted, nil
 	}
@@ -351,16 +351,16 @@ func (c *CloudProvider) isNodeClassDrifted(ctx context.Context, nodeClaim *karpv
 	return subnetDrifted, nil
 }
 
-func (c *CloudProvider) areStaticFieldsDrifted(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.ECSNodeClass) cloudprovider.DriftReason {
-	nodeClassHash, foundNodeClassHash := nodeClass.Annotations[v1alpha1.AnnotationECSNodeClassHash]
-	nodeClassHashVersion, foundNodeClassHashVersion := nodeClass.Annotations[v1alpha1.AnnotationECSNodeClassHashVersion]
-	nodeClaimHash, foundNodeClaimHash := nodeClaim.Annotations[v1alpha1.AnnotationECSNodeClassHash]
-	nodeClaimHashVersion, foundNodeClaimHashVersion := nodeClaim.Annotations[v1alpha1.AnnotationECSNodeClassHashVersion]
+func (c *CloudProvider) areStaticFieldsDrifted(nodeClaim *karpv1.NodeClaim, nodeClass *v1alpha1.CCENodeClass) cloudprovider.DriftReason {
+	nodeClassHash, foundNodeClassHash := nodeClass.Annotations[v1alpha1.AnnotationCCENodeClassHash]
+	nodeClassHashVersion, foundNodeClassHashVersion := nodeClass.Annotations[v1alpha1.AnnotationCCENodeClassHashVersion]
+	nodeClaimHash, foundNodeClaimHash := nodeClaim.Annotations[v1alpha1.AnnotationCCENodeClassHash]
+	nodeClaimHashVersion, foundNodeClaimHashVersion := nodeClaim.Annotations[v1alpha1.AnnotationCCENodeClassHashVersion]
 
 	if !foundNodeClassHash || !foundNodeClaimHash || !foundNodeClassHashVersion || !foundNodeClaimHashVersion {
 		return ""
 	}
-	// validate that the hash version for the ECSNodeClass is the same as the NodeClaim before evaluating for static drift
+	// validate that the hash version for the CCENodeClass is the same as the NodeClaim before evaluating for static drift
 	if nodeClassHashVersion != nodeClaimHashVersion {
 		return ""
 	}
@@ -375,7 +375,7 @@ func (c *CloudProvider) getInstance(ctx context.Context, providerID string) (*in
 	return instance, nil
 }
 
-func (c *CloudProvider) isSubnetDrifted(instance *instance.Instance, nodeClass *v1alpha1.ECSNodeClass) (cloudprovider.DriftReason, error) {
+func (c *CloudProvider) isSubnetDrifted(instance *instance.Instance, nodeClass *v1alpha1.CCENodeClass) (cloudprovider.DriftReason, error) {
 	// subnets need to be found to check for drift
 	if len(nodeClass.Status.Subnets) == 0 {
 		return "", fmt.Errorf("no subnets are discovered")

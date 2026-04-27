@@ -28,8 +28,8 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// ECSNodeClassSpec defines the desired state of ECSNodeClass
-type ECSNodeClassSpec struct {
+// CCENodeClassSpec defines the desired state of CCENodeClass
+type CCENodeClassSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 	// The following markers will use OpenAPI v3 schema to validate the value
@@ -179,7 +179,7 @@ type UserPassword struct {
 }
 
 // ResolveIMSForCreateNode resolves the node OS selection for CCE CreateNode.
-func (s *ECSNodeClassSpec) ResolveIMSForCreateNode() (osAlias string, err error) {
+func (s *CCENodeClassSpec) ResolveIMSForCreateNode() (osAlias string, err error) {
 	if s == nil {
 		return "", fmt.Errorf("nodeClass.spec is nil")
 	}
@@ -190,7 +190,7 @@ func (s *ECSNodeClassSpec) ResolveIMSForCreateNode() (osAlias string, err error)
 	return osAlias, nil
 }
 
-func (s *ECSNodeClassSpec) ValidateForCreateNode() error {
+func (s *CCENodeClassSpec) ValidateForCreateNode() error {
 	if s == nil {
 		return fmt.Errorf("nodeClass.spec is nil")
 	}
@@ -208,7 +208,7 @@ func (s *ECSNodeClassSpec) ValidateForCreateNode() error {
 	return nil
 }
 
-func (s *ECSNodeClassSpec) normalizedIMSSelection() normalizedIMSSelection {
+func (s *CCENodeClassSpec) normalizedIMSSelection() normalizedIMSSelection {
 	if s == nil {
 		return normalizedIMSSelection{}
 	}
@@ -237,7 +237,7 @@ func normalizeBlockDevice(device *BlockDevice) normalizedVolume {
 	}
 }
 
-func (s *ECSNodeClassSpec) normalizedBlockDeviceMappings() normalizedBlockDeviceMappings {
+func (s *CCENodeClassSpec) normalizedBlockDeviceMappings() normalizedBlockDeviceMappings {
 	if s == nil {
 		return normalizedBlockDeviceMappings{}
 	}
@@ -257,7 +257,7 @@ func (s *ECSNodeClassSpec) normalizedBlockDeviceMappings() normalizedBlockDevice
 	}
 }
 
-func (s *ECSNodeClassSpec) normalizedRuntimeConfiguration() normalizedRuntimeConfiguration {
+func (s *CCENodeClassSpec) normalizedRuntimeConfiguration() normalizedRuntimeConfiguration {
 	runtimeType := "containerd"
 	if s != nil && s.RuntimeConfiguration != nil && strings.TrimSpace(s.RuntimeConfiguration.Type) != "" {
 		runtimeType = strings.TrimSpace(s.RuntimeConfiguration.Type)
@@ -265,7 +265,7 @@ func (s *ECSNodeClassSpec) normalizedRuntimeConfiguration() normalizedRuntimeCon
 	return normalizedRuntimeConfiguration{Type: runtimeType}
 }
 
-func (s *ECSNodeClassSpec) normalizedLogin() normalizedLogin {
+func (s *CCENodeClassSpec) normalizedLogin() normalizedLogin {
 	if s == nil {
 		return normalizedLogin{}
 	}
@@ -285,32 +285,32 @@ func (s *ECSNodeClassSpec) normalizedLogin() normalizedLogin {
 // +kubebuilder:resource:scope=Cluster
 // +kubebuilder:subresource:status
 
-// ECSNodeClass is the Schema for the ecsnodeclasses API
-type ECSNodeClass struct {
+// CCENodeClass is the Schema for the ccenodeclasses API
+type CCENodeClass struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is a standard object metadata
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	// spec defines the desired state of ECSNodeClass
+	// spec defines the desired state of CCENodeClass
 	// +required
-	Spec ECSNodeClassSpec `json:"spec"`
+	Spec CCENodeClassSpec `json:"spec"`
 
-	// status defines the observed state of ECSNodeClass
+	// status defines the observed state of CCENodeClass
 	// +optional
-	Status ECSNodeClassStatus `json:"status,omitempty"`
+	Status CCENodeClassStatus `json:"status,omitempty"`
 }
 
-// We need to bump the ECSNodeClassHashVersion when we make an update to the ECSNodeClass CRD under these conditions:
+// We need to bump the CCENodeClassHashVersion when we make an update to the CCENodeClass CRD under these conditions:
 // 1. A field changes its default value for an existing field that is already hashed
 // 2. A field is added to the hash calculation with an already-set value
 // 3. A field is removed from the hash calculations
-const ECSNodeClassHashVersion = "v2"
+const CCENodeClassHashVersion = "v2"
 
-func (in *ECSNodeClass) Hash() string {
+func (in *CCENodeClass) Hash() string {
 	return fmt.Sprint(lo.Must(hashstructure.Hash(struct {
-		Spec                         ECSNodeClassSpec
+		Spec                         CCENodeClassSpec
 		EffectiveIMS                 normalizedIMSSelection
 		EffectiveBlockDeviceMappings normalizedBlockDeviceMappings
 		EffectiveRuntime             normalizedRuntimeConfiguration
@@ -330,11 +330,11 @@ func (in *ECSNodeClass) Hash() string {
 
 // +kubebuilder:object:root=true
 
-// ECSNodeClassList contains a list of ECSNodeClass
-type ECSNodeClassList struct {
+// CCENodeClassList contains a list of CCENodeClass
+type CCENodeClassList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ECSNodeClass `json:"items"`
+	Items           []CCENodeClass `json:"items"`
 }
 
 // SubnetSelectorTerm defines selection logic for a subnet used by Karpenter to launch nodes.
@@ -437,6 +437,6 @@ type KubeletConfiguration struct {
 	CPUCFSQuota *bool `json:"cpuCFSQuota,omitempty"`
 }
 
-func (in *ECSNodeClass) KubeletConfiguration() *KubeletConfiguration {
+func (in *CCENodeClass) KubeletConfiguration() *KubeletConfiguration {
 	return in.Spec.Kubelet
 }

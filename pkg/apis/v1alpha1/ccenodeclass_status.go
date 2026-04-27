@@ -26,8 +26,8 @@ const (
 	ConditionTypeValidationSucceeded = "ValidationSucceeded"
 )
 
-// ECSNodeClassStatus defines the observed state of ECSNodeClass.
-type ECSNodeClassStatus struct {
+// CCENodeClassStatus defines the observed state of CCENodeClass.
+type CCENodeClassStatus struct {
 	// Subnets contains the current subnet values that are available to the
 	// cluster under the subnet selectors.
 	// +optional
@@ -37,15 +37,15 @@ type ECSNodeClassStatus struct {
 	Conditions []status.Condition `json:"conditions,omitempty"`
 }
 
-func (in *ECSNodeClass) GetConditions() []status.Condition {
+func (in *CCENodeClass) GetConditions() []status.Condition {
 	return in.Status.Conditions
 }
 
-func (in *ECSNodeClass) SetConditions(conditions []status.Condition) {
+func (in *CCENodeClass) SetConditions(conditions []status.Condition) {
 	in.Status.Conditions = conditions
 }
 
-func (in *ECSNodeClass) StatusConditions() status.ConditionSet {
+func (in *CCENodeClass) StatusConditions() status.ConditionSet {
 	conds := []string{
 		ConditionTypeSubnetsReady,
 	}
@@ -62,7 +62,7 @@ type Subnet struct {
 	Zone string `json:"zone"`
 }
 
-func (in *ECSNodeClass) Zones() []string {
+func (in *CCENodeClass) Zones() []string {
 	return lo.Map(in.Status.Subnets, func(_ Subnet, i int) string {
 		return in.Status.Subnets[i].Zone
 	})

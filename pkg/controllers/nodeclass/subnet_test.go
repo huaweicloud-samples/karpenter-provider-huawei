@@ -28,11 +28,11 @@ func (s *stubSubnetProvider) LivenessProbe(_ *http.Request) error {
 	return nil
 }
 
-func (s *stubSubnetProvider) List(context.Context, *v1alpha1.ECSNodeClass) ([]vpcMdl.Subnet, error) {
+func (s *stubSubnetProvider) List(context.Context, *v1alpha1.CCENodeClass) ([]vpcMdl.Subnet, error) {
 	return s.subnets, s.err
 }
 
-func (s *stubSubnetProvider) ZonalSubnetsForLaunch(context.Context, *v1alpha1.ECSNodeClass, []*cloudprovider.InstanceType, string) (map[string]*providersubnet.Subnet, error) {
+func (s *stubSubnetProvider) ZonalSubnetsForLaunch(context.Context, *v1alpha1.CCENodeClass, []*cloudprovider.InstanceType, string) (map[string]*providersubnet.Subnet, error) {
 	return nil, nil
 }
 
@@ -57,7 +57,7 @@ func TestSubnetReconcilerFallsBackToNodeZone(t *testing.T) {
 			{Id: "subnet-123", AvailabilityZone: "", AvailableIpAddressCount: 10},
 		},
 	})
-	nodeClass := &v1alpha1.ECSNodeClass{}
+	nodeClass := &v1alpha1.CCENodeClass{}
 
 	if _, err := reconciler.Reconcile(context.Background(), nodeClass); err != nil {
 		t.Fatalf("reconciling subnet status: %v", err)
@@ -83,7 +83,7 @@ func TestSubnetReconcilerMarksSubnetsNotReadyWhenZoneCannotBeResolved(t *testing
 			{Id: "subnet-123", AvailabilityZone: "", AvailableIpAddressCount: 10},
 		},
 	})
-	nodeClass := &v1alpha1.ECSNodeClass{}
+	nodeClass := &v1alpha1.CCENodeClass{}
 
 	result, err := reconciler.Reconcile(context.Background(), nodeClass)
 	if err != nil {
@@ -126,7 +126,7 @@ func TestSubnetReconcilerExpandsSubnetAcrossObservedZones(t *testing.T) {
 			{Id: "subnet-123", AvailabilityZone: "", AvailableIpAddressCount: 10},
 		},
 	})
-	nodeClass := &v1alpha1.ECSNodeClass{}
+	nodeClass := &v1alpha1.CCENodeClass{}
 
 	if _, err := reconciler.Reconcile(context.Background(), nodeClass); err != nil {
 		t.Fatalf("reconciling subnet status: %v", err)

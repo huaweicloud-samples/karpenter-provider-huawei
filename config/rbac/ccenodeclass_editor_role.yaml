@@ -11,12 +11,12 @@ metadata:
   labels:
     app.kubernetes.io/name: karpenter-provider-huawei
     app.kubernetes.io/managed-by: kustomize
-  name: ecsnodeclass-editor-role
+  name: ccenodeclass-editor-role
 rules:
 - apiGroups:
   - karpenter.k8s.huawei
   resources:
-  - ecsnodeclasses
+  - ccenodeclasses
   verbs:
   - create
   - delete
@@ -28,6 +28,6 @@ rules:
 - apiGroups:
   - karpenter.k8s.huawei
   resources:
-  - ecsnodeclasses/status
+  - ccenodeclasses/status
   verbs:
   - get

@@ -43,8 +43,8 @@ import (
 
 type Provider interface {
 	LivenessProbe(*http.Request) error
-	List(context.Context, *v1alpha1.ECSNodeClass) ([]vpcMdl.Subnet, error)
-	ZonalSubnetsForLaunch(context.Context, *v1alpha1.ECSNodeClass, []*cloudprovider.InstanceType, string) (map[string]*Subnet, error)
+	List(context.Context, *v1alpha1.CCENodeClass) ([]vpcMdl.Subnet, error)
+	ZonalSubnetsForLaunch(context.Context, *v1alpha1.CCENodeClass, []*cloudprovider.InstanceType, string) (map[string]*Subnet, error)
 	UpdateInflightIPs(*cms.CreateAutoLaunchGroupRequest, *cms.CreateAutoLaunchGroupResponse, []*cloudprovider.InstanceType, []*Subnet, string)
 }
 
@@ -81,7 +81,7 @@ func (p *DefaultProvider) LivenessProbe(_ *http.Request) error {
 	return nil
 }
 
-func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.ECSNodeClass) ([]vpcMdl.Subnet, error) {
+func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.CCENodeClass) ([]vpcMdl.Subnet, error) {
 	p.Lock()
 	defer p.Unlock()
 
@@ -151,7 +151,7 @@ func matchesSubnetSelectorTerms(subnet vpcMdl.Subnet, terms []v1alpha1.SubnetSel
 }
 
 // ZonalSubnetsForLaunch returns a mapping of zone to the subnet with the most available IP addresses and deducts the passed ips from the available count
-func (p *DefaultProvider) ZonalSubnetsForLaunch(ctx context.Context, nodeClass *v1alpha1.ECSNodeClass, instanceTypes []*cloudprovider.InstanceType, capacityType string) (map[string]*Subnet, error) {
+func (p *DefaultProvider) ZonalSubnetsForLaunch(ctx context.Context, nodeClass *v1alpha1.CCENodeClass, instanceTypes []*cloudprovider.InstanceType, capacityType string) (map[string]*Subnet, error) {
 	if len(nodeClass.Status.Subnets) == 0 {
 		return nil, fmt.Errorf("no subnets matched selector %v", nodeClass.Spec.SubnetSelectorTerms)
 	}

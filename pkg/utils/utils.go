@@ -39,6 +39,6 @@ func PrettySlice[T any](s []T, maxItems int) string {
 	return sb.String()
 }
 
-func GetNodeClassHash(nodeClass *v1alpha1.ECSNodeClass) string {
+func GetNodeClassHash(nodeClass *v1alpha1.CCENodeClass) string {
 	return fmt.Sprintf("%s-%d", nodeClass.UID, nodeClass.Generation)
 }

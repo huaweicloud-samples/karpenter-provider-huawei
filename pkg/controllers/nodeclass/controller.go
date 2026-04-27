@@ -47,9 +47,9 @@ import (
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/subnet"
 )
 
-// +kubebuilder:rbac:groups=karpenter.k8s.huawei,resources=ecsnodeclasses,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=karpenter.k8s.huawei,resources=ecsnodeclasses/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=karpenter.k8s.huawei,resources=ecsnodeclasses/finalizers,verbs=update
+// +kubebuilder:rbac:groups=karpenter.k8s.huawei,resources=ccenodeclasses,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=karpenter.k8s.huawei,resources=ccenodeclasses/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=karpenter.k8s.huawei,resources=ccenodeclasses/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=pods;nodes;persistentvolumes;persistentvolumeclaims;replicationcontrollers;namespaces,verbs=get;list;watch
 // +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=create;patch;delete;update
@@ -67,7 +67,7 @@ import (
 type Controller struct {
 	kubeClient  client.Client
 	recorder    events.Recorder
-	reconcilers []reconcile.TypedReconciler[*v1alpha1.ECSNodeClass]
+	reconcilers []reconcile.TypedReconciler[*v1alpha1.CCENodeClass]
 }
 
 func NewController(
@@ -78,7 +78,7 @@ func NewController(
 	return &Controller{
 		kubeClient: kubeClient,
 		recorder:   recorder,
-		reconcilers: []reconcile.TypedReconciler[*v1alpha1.ECSNodeClass]{
+		reconcilers: []reconcile.TypedReconciler[*v1alpha1.CCENodeClass]{
 			NewSubnetReconciler(kubeClient, subnetProvider),
 		},
 	}
@@ -88,7 +88,7 @@ func (c *Controller) Name() string {
 	return "nodeclass"
 }
 
-func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.ECSNodeClass) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.CCENodeClass) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, c.Name())
 
 	if !nodeClass.GetDeletionTimestamp().IsZero() {
@@ -139,7 +139,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.ECSNodeC
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named(c.Name()).
-		For(&v1alpha1.ECSNodeClass{}).
+		For(&v1alpha1.CCENodeClass{}).
 		Watches(
 			&karpv1.NodeClaim{},
 			handler.EnqueueRequestsFromMapFunc(func(_ context.Context, o client.Object) []reconcile.Request {
@@ -163,7 +163,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
-func (c *Controller) finalize(ctx context.Context, nodeClass *v1alpha1.ECSNodeClass) (reconcile.Result, error) {
+func (c *Controller) finalize(ctx context.Context, nodeClass *v1alpha1.CCENodeClass) (reconcile.Result, error) {
 	stored := nodeClass.DeepCopy()
 	if !controllerutil.ContainsFinalizer(nodeClass, karpv1.TerminationFinalizer) {
 		return reconcile.Result{}, nil

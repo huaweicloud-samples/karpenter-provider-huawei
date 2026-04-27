@@ -22,7 +22,7 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the karpenter-provider-huawei itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
-- ecsnodeclass_admin_role.yaml
-- ecsnodeclass_editor_role.yaml
-- ecsnodeclass_viewer_role.yaml
+- ccenodeclass_admin_role.yaml
+- ccenodeclass_editor_role.yaml
+- ccenodeclass_viewer_role.yaml
 

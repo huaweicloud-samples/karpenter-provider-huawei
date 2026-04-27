@@ -51,8 +51,8 @@ func TestUpdateInflightIPs_ReleasesSingleReservationBackToBaseline(t *testing.T)
 	instanceTypes := []*cloudprovider.InstanceType{
 		newTestInstanceType(zone, capacityType, instancePods),
 	}
-	nodeClass := &v1alpha1.ECSNodeClass{
-		Status: v1alpha1.ECSNodeClassStatus{
+	nodeClass := &v1alpha1.CCENodeClass{
+		Status: v1alpha1.CCENodeClassStatus{
 			Subnets: []v1alpha1.Subnet{
 				{ID: subnetID, Zone: zone},
 			},
@@ -94,8 +94,8 @@ func TestUpdateInflightIPs_ReleasesReservationsInSteps(t *testing.T) {
 	instanceTypes := []*cloudprovider.InstanceType{
 		newTestInstanceType(zone, capacityType, instancePods),
 	}
-	nodeClass := &v1alpha1.ECSNodeClass{
-		Status: v1alpha1.ECSNodeClassStatus{
+	nodeClass := &v1alpha1.CCENodeClass{
+		Status: v1alpha1.CCENodeClassStatus{
 			Subnets: []v1alpha1.Subnet{
 				{ID: subnetID, Zone: zone},
 			},
@@ -136,8 +136,8 @@ func TestList_MatchesIDOnly(t *testing.T) {
 		},
 	}
 	p := newTestProviderWithVPC(vpcapi)
-	nodeClass := &v1alpha1.ECSNodeClass{
-		Spec: v1alpha1.ECSNodeClassSpec{
+	nodeClass := &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
 				{ID: "subnet-123"},
 			},
@@ -167,8 +167,8 @@ func TestList_MatchesNameOnly(t *testing.T) {
 		},
 	}
 	p := newTestProviderWithVPC(vpcapi)
-	nodeClass := &v1alpha1.ECSNodeClass{
-		Spec: v1alpha1.ECSNodeClassSpec{
+	nodeClass := &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
 				{Name: "subnet-b"},
 			},
@@ -192,8 +192,8 @@ func TestList_MatchesIDAndName(t *testing.T) {
 		},
 	}
 	p := newTestProviderWithVPC(vpcapi)
-	nodeClass := &v1alpha1.ECSNodeClass{
-		Spec: v1alpha1.ECSNodeClassSpec{
+	nodeClass := &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
 				{ID: "subnet-123", Name: "subnet-a"},
 			},
@@ -216,8 +216,8 @@ func TestList_MatchesIDAndNameRequiresBoth(t *testing.T) {
 		},
 	}
 	p := newTestProviderWithVPC(vpcapi)
-	nodeClass := &v1alpha1.ECSNodeClass{
-		Spec: v1alpha1.ECSNodeClassSpec{
+	nodeClass := &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
 				{ID: "subnet-123", Name: "subnet-a"},
 			},
@@ -241,8 +241,8 @@ func TestList_MatchesMultipleTermsOR(t *testing.T) {
 		},
 	}
 	p := newTestProviderWithVPC(vpcapi)
-	nodeClass := &v1alpha1.ECSNodeClass{
-		Spec: v1alpha1.ECSNodeClassSpec{
+	nodeClass := &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
 				{ID: "subnet-123"},
 				{Name: "subnet-b"},
@@ -266,8 +266,8 @@ func TestList_DedupesWhenMultipleTermsMatchSameSubnet(t *testing.T) {
 		},
 	}
 	p := newTestProviderWithVPC(vpcapi)
-	nodeClass := &v1alpha1.ECSNodeClass{
-		Spec: v1alpha1.ECSNodeClassSpec{
+	nodeClass := &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{
 				{ID: "subnet-123"},
 				{Name: "subnet-a"},

@@ -71,13 +71,13 @@ helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
 
 ## Getting Started
 
-### Step 1: Create an ECSNodeClass
+### Step 1: Create a CCENodeClass
 
-`ECSNodeClass` is a **cluster-scoped** resource that defines Huawei Cloud-specific node configuration:
+`CCENodeClass` is a **cluster-scoped** resource that defines Huawei Cloud-specific node configuration:
 
 ```yaml
 apiVersion: karpenter.k8s.huawei/v1alpha1
-kind: ECSNodeClass
+kind: CCENodeClass
 metadata:
   name: default
 spec:
@@ -106,12 +106,12 @@ spec:
 After creation, wait for the `SubnetsReady` condition to become `True` before the NodeClass can be used for provisioning:
 
 ```bash
-kubectl get ecsnodeclass default -o jsonpath='{.status.conditions}'
+kubectl get ccenodeclass default -o jsonpath='{.status.conditions}'
 ```
 
 ### Step 2: Create a NodePool
 
-Create a Karpenter `NodePool` that references your `ECSNodeClass`:
+Create a Karpenter `NodePool` that references your `CCENodeClass`:
 
 ```yaml
 apiVersion: karpenter.sh/v1
@@ -123,7 +123,7 @@ spec:
     spec:
       nodeClassRef:
         group: karpenter.k8s.huawei
-        kind: ECSNodeClass
+        kind: CCENodeClass
         name: default
       requirements:
         - key: karpenter.sh/capacity-type
