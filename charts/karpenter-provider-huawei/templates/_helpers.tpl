@@ -46,6 +46,17 @@ ServiceAccount name
 {{- end }}
 
 {{/*
+Huawei Cloud credentials Secret name
+*/}}
+{{- define "karpenter-provider-huawei.credentialsSecretName" -}}
+{{- if and (not .Values.credentials.create) .Values.credentials.existingSecret -}}
+{{- .Values.credentials.existingSecret -}}
+{{- else -}}
+{{- .Values.credentials.name -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 Resource name with prefix
 */}}
 {{- define "karpenter-provider-huawei.fullname" -}}

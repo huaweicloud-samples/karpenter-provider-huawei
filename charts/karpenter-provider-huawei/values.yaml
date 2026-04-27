@@ -22,6 +22,10 @@ rbacProxy:
     # -- Image pull policy
     pullPolicy: IfNotPresent
 
+# -- Image pull secrets for controller pods
+imagePullSecrets: []
+# - name: registry-credentials
+
 # -- Name prefix for all resources
 namePrefix: "karpenter-provider-huawei-"
 
@@ -38,11 +42,22 @@ controller:
   # -- Health probe port
   healthProbePort: 8081
 
-# -- Existing secret name for Huawei Cloud credentials
-# The secret must contain: HUAWEICLOUD_AK, HUAWEICLOUD_SK, HUAWEICLOUD_REGION, HUAWEICLOUD_CCE_CLUSTER_ID
+# Huawei Cloud credentials
 credentials:
-  # -- Use existing secret for credentials
-  existingSecret: "huawei-credentials"
+  # -- Create a Secret for credentials
+  create: true
+  # -- Secret name for Huawei Cloud credentials
+  name: "huawei-credentials"
+  # -- Use an existing Secret when credentials.create is false
+  existingSecret: ""
+  # -- Huawei Cloud access key
+  accessKey: ""
+  # -- Huawei Cloud secret key
+  secretKey: ""
+  # -- Huawei Cloud region ID
+  region: ""
+  # -- Huawei Cloud CCE cluster ID
+  ClusterID: ""
 
 # Controller resources
 resources:
