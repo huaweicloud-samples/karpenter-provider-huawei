@@ -33,26 +33,20 @@ This project is at an early **v1alpha1** stage. Please be aware of the following
 
 ## Installation
 
-### 1. Create Huawei Cloud Credentials Secret
-
-```bash
-kubectl create namespace karpenter-provider-huawei-system
-
-kubectl create secret generic huawei-credentials \
-  --namespace karpenter-provider-huawei-system \
-  --from-literal=HUAWEICLOUD_AK=<your-access-key> \
-  --from-literal=HUAWEICLOUD_SK=<your-secret-key> \
-  --from-literal=HUAWEICLOUD_REGION=<region-id> \
-  --from-literal=HUAWEICLOUD_CCE_CLUSTER_ID=<cce-cluster-id>
-```
-
-### 2. Install via Helm
+### 1. Install via Helm
 
 ```bash
 helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
   --namespace karpenter-provider-huawei-system \
-  --create-namespace
+  --create-namespace \
+  --set-string credentials.accessKey=<your-access-key> \
+  --set-string credentials.secretKey=<your-secret-key> \
+  --set-string credentials.region=<region-id> \
+  --set-string credentials.ClusterID=<cce-cluster-id>
 ```
+
+The chart creates a `huawei-credentials` Secret by default and loads it into the controller.
+To use an existing Secret instead, set `credentials.create=false` and `credentials.existingSecret=<secret-name>`.
 
 The default controller image is:
 ```
@@ -64,9 +58,13 @@ To use a custom controller image:
 ```bash
 helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
   --namespace karpenter-provider-huawei-system \
+  --create-namespace \
   --set image.repository=<your-registry>/controller \
   --set image.tag=<your-tag> \
-  --create-namespace
+  --set-string credentials.accessKey=<your-access-key> \
+  --set-string credentials.secretKey=<your-secret-key> \
+  --set-string credentials.region=<region-id> \
+  --set-string credentials.ClusterID=<cce-cluster-id>
 ```
 
 ## Getting Started

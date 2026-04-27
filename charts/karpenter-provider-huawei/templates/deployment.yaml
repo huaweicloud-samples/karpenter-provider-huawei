@@ -22,6 +22,10 @@ spec:
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
       - name: kube-rbac-proxy
         image: "{{ .Values.rbacProxy.image.repository }}:{{ .Values.rbacProxy.image.tag }}"
@@ -60,7 +64,7 @@ spec:
               fieldPath: metadata.namespace
         envFrom:
         - secretRef:
-            name: {{ .Values.credentials.existingSecret }}
+            name: {{ include "karpenter-provider-huawei.credentialsSecretName" . }}
         {{- with .Values.securityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}
