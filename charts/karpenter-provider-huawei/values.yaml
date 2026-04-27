@@ -57,7 +57,17 @@ credentials:
   # -- Huawei Cloud region ID
   region: ""
   # -- Huawei Cloud CCE cluster ID
-  ClusterID: ""
+  clusterID: ""
+
+clusterInfo:
+  # -- Cluster category: Optional. Enter "eni" for Turbo network types.
+  # For other network types (vpc-router or overlay_l2), enter other values.
+  category: ""
+
+# -- yangtseEipInfo: Supports user-defined EIPs (Elastic IPs) bound to Karpenter pods.
+# This only takes effect when clusterInfo.category is set to "eni".
+yangtseEipInfo:
+  yangtse.io/pod-with-eip: "true"
 
 # Controller resources
 resources:

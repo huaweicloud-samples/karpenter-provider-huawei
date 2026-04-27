@@ -42,7 +42,7 @@ helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
   --set-string credentials.accessKey=<your-access-key> \
   --set-string credentials.secretKey=<your-secret-key> \
   --set-string credentials.region=<region-id> \
-  --set-string credentials.ClusterID=<cce-cluster-id>
+  --set-string credentials.clusterID=<cce-cluster-id>
 ```
 
 The chart creates a `huawei-credentials` Secret by default and loads it into the controller.
@@ -64,7 +64,7 @@ helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
   --set-string credentials.accessKey=<your-access-key> \
   --set-string credentials.secretKey=<your-secret-key> \
   --set-string credentials.region=<region-id> \
-  --set-string credentials.ClusterID=<cce-cluster-id>
+  --set-string credentials.clusterID=<cce-cluster-id>
 ```
 
 ## Getting Started

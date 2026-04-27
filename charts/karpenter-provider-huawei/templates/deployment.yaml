@@ -15,6 +15,11 @@ spec:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
+        {{- if eq .Values.clusterInfo.category "eni" }}
+        {{- with .Values.yangtseEipInfo }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- end }}
       labels:
         {{- include "karpenter-provider-huawei.selectorLabels" . | nindent 8 }}
     spec:
