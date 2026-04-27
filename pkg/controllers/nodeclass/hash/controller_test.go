@@ -14,11 +14,11 @@ import (
 )
 
 func TestReconcile_PatchesMissingHashAnnotations(t *testing.T) {
-	nodeClass := &v1alpha1.ECSNodeClass{
+	nodeClass := &v1alpha1.CCENodeClass{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "default",
 		},
-		Spec: v1alpha1.ECSNodeClassSpec{
+		Spec: v1alpha1.CCENodeClassSpec{
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{{ID: "123e4567-e89b-12d3-a456-426614174000"}},
 			IMSSelector:         v1alpha1.IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
 			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
@@ -61,14 +61,14 @@ func TestReconcile_PatchesMissingHashAnnotations(t *testing.T) {
 		t.Fatalf("reconciling nodeclass hash: %v", err)
 	}
 
-	updated := &v1alpha1.ECSNodeClass{}
+	updated := &v1alpha1.CCENodeClass{}
 	if err := kubeClient.Get(context.Background(), client.ObjectKey{Name: "default"}, updated); err != nil {
 		t.Fatalf("getting updated nodeclass: %v", err)
 	}
-	if got := updated.Annotations[v1alpha1.AnnotationECSNodeClassHash]; got != nodeClass.Hash() {
-		t.Fatalf("expected ecsnodeclass hash annotation %q, got %q", nodeClass.Hash(), got)
+	if got := updated.Annotations[v1alpha1.AnnotationCCENodeClassHash]; got != nodeClass.Hash() {
+		t.Fatalf("expected ccenodeclass hash annotation %q, got %q", nodeClass.Hash(), got)
 	}
-	if got := updated.Annotations[v1alpha1.AnnotationECSNodeClassHashVersion]; got != v1alpha1.ECSNodeClassHashVersion {
-		t.Fatalf("expected ecsnodeclass hash version %q, got %q", v1alpha1.ECSNodeClassHashVersion, got)
+	if got := updated.Annotations[v1alpha1.AnnotationCCENodeClassHashVersion]; got != v1alpha1.CCENodeClassHashVersion {
+		t.Fatalf("expected ccenodeclass hash version %q, got %q", v1alpha1.CCENodeClassHashVersion, got)
 	}
 }

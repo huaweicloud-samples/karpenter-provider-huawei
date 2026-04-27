@@ -32,7 +32,7 @@ func init() {
 	gv := schema.GroupVersion{Group: apis.Group, Version: "v1alpha1"}
 	metav1.AddToGroupVersion(scheme.Scheme, gv)
 	scheme.Scheme.AddKnownTypes(gv,
-		&ECSNodeClass{},
-		&ECSNodeClassList{},
+		&CCENodeClass{},
+		&CCENodeClassList{},
 	)
 }

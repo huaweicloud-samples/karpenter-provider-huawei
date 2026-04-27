@@ -38,8 +38,8 @@ var (
 	LabelInstanceGPUCount         = apis.Group + "/instance-gpu-count"
 	LabelInstanceGPUMemory        = apis.Group + "/instance-gpu-memory"
 
-	AnnotationECSNodeClassHash        = apis.Group + "/ecsnodeclass-hash"
-	AnnotationECSNodeClassHashVersion = apis.Group + "/ecsnodeclass-hash-version"
+	AnnotationCCENodeClassHash        = apis.Group + "/ccenodeclass-hash"
+	AnnotationCCENodeClassHashVersion = apis.Group + "/ccenodeclass-hash-version"
 
 	AnnotationNodeID     = apis.Group + "/cce-node-id"
 	AnnotationInstanceID = apis.Group + "/ecs-server-id"

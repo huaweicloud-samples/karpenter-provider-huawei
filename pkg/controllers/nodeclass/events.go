@@ -26,7 +26,7 @@ import (
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/utils"
 )
 
-func WaitingOnNodeClaimTerminationEvent(nodeClass *v1alpha1.ECSNodeClass, names []string) events.Event {
+func WaitingOnNodeClaimTerminationEvent(nodeClass *v1alpha1.CCENodeClass, names []string) events.Event {
 	return events.Event{
 		InvolvedObject: nodeClass,
 		Type:           corev1.EventTypeNormal,

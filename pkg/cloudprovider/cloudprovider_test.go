@@ -92,7 +92,7 @@ type stubCloudProviderInstanceProvider struct {
 	createCalls int
 }
 
-func (s *stubCloudProviderInstanceProvider) Create(context.Context, *v1alpha1.ECSNodeClass, *karpv1.NodeClaim, map[string]string, []*karpcloudprovider.InstanceType) (*instanceprovider.Instance, error) {
+func (s *stubCloudProviderInstanceProvider) Create(context.Context, *v1alpha1.CCENodeClass, *karpv1.NodeClaim, map[string]string, []*karpcloudprovider.InstanceType) (*instanceprovider.Instance, error) {
 	s.createCalls++
 	return s.instance, s.err
 }
@@ -121,16 +121,16 @@ func TestAreStaticFieldsDrifted_ReturnsNodeClassDriftWhenHashesDiffer(t *testing
 	nodeClaim := &karpv1.NodeClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Annotations: map[string]string{
-				v1alpha1.AnnotationECSNodeClassHash:        "hash-a",
-				v1alpha1.AnnotationECSNodeClassHashVersion: "v1",
+				v1alpha1.AnnotationCCENodeClassHash:        "hash-a",
+				v1alpha1.AnnotationCCENodeClassHashVersion: "v1",
 			},
 		},
 	}
-	nodeClass := &v1alpha1.ECSNodeClass{
+	nodeClass := &v1alpha1.CCENodeClass{
 		ObjectMeta: metav1.ObjectMeta{
 			Annotations: map[string]string{
-				v1alpha1.AnnotationECSNodeClassHash:        "hash-b",
-				v1alpha1.AnnotationECSNodeClassHashVersion: "v1",
+				v1alpha1.AnnotationCCENodeClassHash:        "hash-b",
+				v1alpha1.AnnotationCCENodeClassHashVersion: "v1",
 			},
 		},
 	}
@@ -140,10 +140,10 @@ func TestAreStaticFieldsDrifted_ReturnsNodeClassDriftWhenHashesDiffer(t *testing
 	}
 }
 
-func TestCreate_AnnotatesReturnedNodeClaimWithECSNodeClassHash(t *testing.T) {
-	nodeClass := &v1alpha1.ECSNodeClass{
+func TestCreate_AnnotatesReturnedNodeClaimWithCCENodeClassHash(t *testing.T) {
+	nodeClass := &v1alpha1.CCENodeClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "default"},
-		Spec: v1alpha1.ECSNodeClassSpec{
+		Spec: v1alpha1.CCENodeClassSpec{
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{{ID: "123e4567-e89b-12d3-a456-426614174000"}},
 			IMSSelector:         v1alpha1.IMSSelector{IMSFamily: " HCE OS 2.0 "},
 			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
@@ -153,7 +153,7 @@ func TestCreate_AnnotatesReturnedNodeClaimWithECSNodeClassHash(t *testing.T) {
 				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
 			},
 		},
-		Status: v1alpha1.ECSNodeClassStatus{
+		Status: v1alpha1.CCENodeClassStatus{
 			Subnets: []v1alpha1.Subnet{{ID: "subnet-123", Zone: "zone-a"}},
 		},
 	}
@@ -187,7 +187,7 @@ func TestCreate_AnnotatesReturnedNodeClaimWithECSNodeClassHash(t *testing.T) {
 		Spec: karpv1.NodeClaimSpec{
 			NodeClassRef: &karpv1.NodeClassReference{
 				Group: "karpenter.k8s.huawei",
-				Kind:  "ECSNodeClass",
+				Kind:  "CCENodeClass",
 				Name:  "default",
 			},
 		},
@@ -203,18 +203,18 @@ func TestCreate_AnnotatesReturnedNodeClaimWithECSNodeClassHash(t *testing.T) {
 	if got := created.Annotations[v1alpha1.AnnotationInstanceID]; got != "server-123" {
 		t.Fatalf("expected instance id annotation %q, got %q", "server-123", got)
 	}
-	if got := created.Annotations[v1alpha1.AnnotationECSNodeClassHash]; got != nodeClass.Hash() {
-		t.Fatalf("expected ecsnodeclass hash annotation %q, got %q", nodeClass.Hash(), got)
+	if got := created.Annotations[v1alpha1.AnnotationCCENodeClassHash]; got != nodeClass.Hash() {
+		t.Fatalf("expected ccenodeclass hash annotation %q, got %q", nodeClass.Hash(), got)
 	}
-	if got := created.Annotations[v1alpha1.AnnotationECSNodeClassHashVersion]; got != v1alpha1.ECSNodeClassHashVersion {
-		t.Fatalf("expected ecsnodeclass hash version %q, got %q", v1alpha1.ECSNodeClassHashVersion, got)
+	if got := created.Annotations[v1alpha1.AnnotationCCENodeClassHashVersion]; got != v1alpha1.CCENodeClassHashVersion {
+		t.Fatalf("expected ccenodeclass hash version %q, got %q", v1alpha1.CCENodeClassHashVersion, got)
 	}
 }
 
 func TestCreate_RejectsNodeClassWithUndersizedDataVolumeBeforeCallingCloudAPI(t *testing.T) {
-	nodeClass := &v1alpha1.ECSNodeClass{
+	nodeClass := &v1alpha1.CCENodeClass{
 		ObjectMeta: metav1.ObjectMeta{Name: "default"},
-		Spec: v1alpha1.ECSNodeClassSpec{
+		Spec: v1alpha1.CCENodeClassSpec{
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{{ID: "123e4567-e89b-12d3-a456-426614174000"}},
 			IMSSelector:         v1alpha1.IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
 			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
@@ -228,7 +228,7 @@ func TestCreate_RejectsNodeClassWithUndersizedDataVolumeBeforeCallingCloudAPI(t 
 				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
 			},
 		},
-		Status: v1alpha1.ECSNodeClassStatus{
+		Status: v1alpha1.CCENodeClassStatus{
 			Subnets: []v1alpha1.Subnet{{ID: "subnet-123", Zone: "zone-a"}},
 		},
 	}
@@ -252,7 +252,7 @@ func TestCreate_RejectsNodeClassWithUndersizedDataVolumeBeforeCallingCloudAPI(t 
 		Spec: karpv1.NodeClaimSpec{
 			NodeClassRef: &karpv1.NodeClassReference{
 				Group: "karpenter.k8s.huawei",
-				Kind:  "ECSNodeClass",
+				Kind:  "CCENodeClass",
 				Name:  "default",
 			},
 		},
@@ -272,8 +272,8 @@ func TestCreate_RejectsNodeClassWithUndersizedDataVolumeBeforeCallingCloudAPI(t 
 
 func TestIsSubnetDrifted_ReturnsExpectedDriftReason(t *testing.T) {
 	provider := &CloudProvider{}
-	nodeClass := &v1alpha1.ECSNodeClass{
-		Status: v1alpha1.ECSNodeClassStatus{
+	nodeClass := &v1alpha1.CCENodeClass{
+		Status: v1alpha1.CCENodeClassStatus{
 			Subnets: []v1alpha1.Subnet{{ID: "subnet-123"}},
 		},
 	}

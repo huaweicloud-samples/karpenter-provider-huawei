@@ -5,7 +5,7 @@ resources:
 - bases/karpenter.sh_nodeclaims.yaml
 - bases/karpenter.sh_nodepools.yaml
 - bases/karpenter.sh_nodeoverlays.yaml
-- bases/karpenter.k8s.huawei_ecsnodeclasses.yaml
+- bases/karpenter.k8s.huawei_ccenodeclasses.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

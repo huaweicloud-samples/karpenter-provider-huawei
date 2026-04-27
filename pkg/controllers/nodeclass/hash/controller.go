@@ -45,19 +45,19 @@ func NewController(kubeClient client.Client) *Controller {
 	}
 }
 
-func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.ECSNodeClass) (reconcile.Result, error) {
+func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.CCENodeClass) (reconcile.Result, error) {
 	ctx = injection.WithControllerName(ctx, "nodeclass.hash")
 
 	stored := nodeClass.DeepCopy()
 
-	if nodeClass.Annotations[v1alpha1.AnnotationECSNodeClassHashVersion] != v1alpha1.ECSNodeClassHashVersion {
+	if nodeClass.Annotations[v1alpha1.AnnotationCCENodeClassHashVersion] != v1alpha1.CCENodeClassHashVersion {
 		if err := c.updateNodeClaimHash(ctx, nodeClass); err != nil {
 			return reconcile.Result{}, err
 		}
 	}
 	nodeClass.Annotations = lo.Assign(nodeClass.Annotations, map[string]string{
-		v1alpha1.AnnotationECSNodeClassHash:        nodeClass.Hash(),
-		v1alpha1.AnnotationECSNodeClassHashVersion: v1alpha1.ECSNodeClassHashVersion,
+		v1alpha1.AnnotationCCENodeClassHash:        nodeClass.Hash(),
+		v1alpha1.AnnotationCCENodeClassHashVersion: v1alpha1.CCENodeClassHashVersion,
 	})
 	if !equality.Semantic.DeepEqual(stored, nodeClass) {
 		if err := c.kubeClient.Patch(ctx, nodeClass, client.MergeFrom(stored)); err != nil {
@@ -70,7 +70,7 @@ func (c *Controller) Reconcile(ctx context.Context, nodeClass *v1alpha1.ECSNodeC
 func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 	return controllerruntime.NewControllerManagedBy(m).
 		Named("nodeclass.hash").
-		For(&v1alpha1.ECSNodeClass{}).
+		For(&v1alpha1.CCENodeClass{}).
 		WithOptions(controller.Options{
 			RateLimiter:             reasonable.RateLimiter(),
 			MaxConcurrentReconciles: 10,
@@ -78,7 +78,7 @@ func (c *Controller) Register(_ context.Context, m manager.Manager) error {
 		Complete(reconcile.AsReconciler(m.GetClient(), c))
 }
 
-func (c *Controller) updateNodeClaimHash(ctx context.Context, nodeClass *v1alpha1.ECSNodeClass) error {
+func (c *Controller) updateNodeClaimHash(ctx context.Context, nodeClass *v1alpha1.CCENodeClass) error {
 	nodeClaims := &karpv1.NodeClaimList{}
 	if err := c.kubeClient.List(ctx, nodeClaims, nodeclaimutils.ForNodeClass(nodeClass)); err != nil {
 		return err
@@ -89,16 +89,16 @@ func (c *Controller) updateNodeClaimHash(ctx context.Context, nodeClass *v1alpha
 		nc := &nodeClaims.Items[i]
 		stored := nc.DeepCopy()
 
-		if nc.Annotations[v1alpha1.AnnotationECSNodeClassHashVersion] != v1alpha1.ECSNodeClassHashVersion {
+		if nc.Annotations[v1alpha1.AnnotationCCENodeClassHashVersion] != v1alpha1.CCENodeClassHashVersion {
 			nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
-				v1alpha1.AnnotationECSNodeClassHashVersion: v1alpha1.ECSNodeClassHashVersion,
+				v1alpha1.AnnotationCCENodeClassHashVersion: v1alpha1.CCENodeClassHashVersion,
 			})
 
-			// Any NodeClaim that is already drifted will remain drifted if the karpenter.k8s.huawei/ecsnodeclass-hash-version doesn't match
+			// Any NodeClaim that is already drifted will remain drifted if the karpenter.k8s.huawei/ccenodeclass-hash-version doesn't match
 			// Since the hashing mechanism has changed we will not be able to determine if the drifted status of the NodeClaim has changed
 			if nc.StatusConditions().Get(karpv1.ConditionTypeDrifted) == nil {
 				nc.Annotations = lo.Assign(nc.Annotations, map[string]string{
-					v1alpha1.AnnotationECSNodeClassHash: nodeClass.Hash(),
+					v1alpha1.AnnotationCCENodeClassHash: nodeClass.Hash(),
 				})
 			}
 
