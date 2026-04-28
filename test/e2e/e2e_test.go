@@ -70,10 +70,10 @@ var _ = Describe("Manager", Ordered, func() {
 
 		By("creating dummy Huawei credentials secret")
 		cmd = exec.Command("kubectl", "create", "secret", "generic", "huawei-credentials",
-			"--from-literal=HUAWEICLOUD_REGION=cn-north-4",
-			"--from-literal=HUAWEICLOUD_AK=fake-ak",
-			"--from-literal=HUAWEICLOUD_SK=fake-sk",
-			"--from-literal=HUAWEICLOUD_CCE_CLUSTER_ID=fake-cluster-id",
+			"--from-literal=HUAWEICLOUD_SDK_REGION_ID=cn-north-4",
+			"--from-literal=HUAWEICLOUD_SDK_AK=fake-ak",
+			"--from-literal=HUAWEICLOUD_SDK_SK=fake-sk",
+			"--from-literal=HUAWEICLOUD_SDK_CCE_CLUSTER_ID=fake-cluster-id",
 			"-n", namespace,
 		)
 		_, err = utils.Run(cmd)

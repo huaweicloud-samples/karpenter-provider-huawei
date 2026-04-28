@@ -43,6 +43,9 @@ controller:
   healthProbePort: 8081
 
 # Huawei Cloud credentials
+# The generated Secret uses HUAWEICLOUD_SDK_AK, HUAWEICLOUD_SDK_SK,
+# HUAWEICLOUD_SDK_REGION_ID, and HUAWEICLOUD_SDK_CCE_CLUSTER_ID.
+# If credentials.create=false, the existing Secret should provide the same keys.
 credentials:
   # -- Create a Secret for credentials
   create: true

@@ -47,6 +47,8 @@ helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
 
 The chart creates a `huawei-credentials` Secret by default and loads it into the controller.
 To use an existing Secret instead, set `credentials.create=false` and `credentials.existingSecret=<secret-name>`.
+When using an existing Secret, provide `HUAWEICLOUD_SDK_AK`, `HUAWEICLOUD_SDK_SK`, `HUAWEICLOUD_SDK_REGION_ID`, and
+`HUAWEICLOUD_SDK_CCE_CLUSTER_ID`.
 
 The default controller image is:
 ```

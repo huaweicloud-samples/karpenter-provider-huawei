@@ -76,7 +76,9 @@ type Operator struct {
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
 	logger := log.FromContext(ctx)
 
-	reg := os.Getenv("HUAWEICLOUD_REGION")
+	projectId := os.Getenv("HUAWEICLOUD_SDK_PROJECT_ID")
+	domainId := os.Getenv("HUAWEICLOUD_SDK_DOMAIN_ID")
+	reg := os.Getenv("HUAWEICLOUD_SDK_REGION_ID")
 	vpcReg, err := vpcRegion.SafeValueOf(reg)
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get VPC region: %w", err))
@@ -89,17 +91,18 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get CCE region: %w", err))
 	}
-	ak := os.Getenv("HUAWEICLOUD_AK")
+	ak := os.Getenv("HUAWEICLOUD_SDK_AK")
 	if ak == "" {
-		lo.Must0(fmt.Errorf("unable to get credentials"))
+		lo.Must0(fmt.Errorf("missing required env: HUAWEICLOUD_SDK_AK"))
 	}
-	sk := os.Getenv("HUAWEICLOUD_SK")
+	sk := os.Getenv("HUAWEICLOUD_SDK_SK")
 	if sk == "" {
-		lo.Must0(fmt.Errorf("unable to get credentials"))
+		lo.Must0(fmt.Errorf("missing required env: HUAWEICLOUD_SDK_SK"))
 	}
 	credentialsBuilder := basic.NewCredentialsBuilder().
 		WithAk(ak).
-		WithSk(sk)
+		WithSk(sk).
+		WithProjectId(projectId)
 	credentials, err := credentialsBuilder.SafeBuild()
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get credentials"))
@@ -107,14 +110,15 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	globalCredentials, err := global.NewCredentialsBuilder().
 		WithAk(ak).
 		WithSk(sk).
+		WithDomainId(domainId).
 		SafeBuild()
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get global credentials"))
 	}
 
-	clusterID := os.Getenv("HUAWEICLOUD_CCE_CLUSTER_ID")
+	clusterID := os.Getenv("HUAWEICLOUD_SDK_CCE_CLUSTER_ID")
 	if clusterID == "" {
-		lo.Must0(fmt.Errorf("unable to get CCE cluster id"))
+		lo.Must0(fmt.Errorf("missing required env: HUAWEICLOUD_SDK_CCE_CLUSTER_ID"))
 	}
 
 	vpcApi := sdk.NewVPCService(vpcReg, credentials, config.DefaultHttpConfig())
