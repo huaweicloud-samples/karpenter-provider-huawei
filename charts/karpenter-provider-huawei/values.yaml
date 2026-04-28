@@ -61,6 +61,22 @@ credentials:
   region: ""
   # -- Huawei Cloud CCE cluster ID
   clusterID: ""
+  # -- Optional project ID to avoid IAM project auto-discovery
+  projectID: ""
+  # -- Optional domain ID to avoid IAM domain auto-discovery
+  domainID: ""
+  # -- Optional custom IAM endpoint
+  iamEndpoint: ""
+  # -- Optional custom ECS endpoint for credentials.region
+  ecsEndpoint: ""
+  # -- Optional custom VPC endpoint for credentials.region
+  vpcEndpoint: ""
+  # -- Optional custom CCE endpoint for credentials.region
+  cceEndpoint: ""
+  # -- Optional custom BSS endpoint for credentials.region
+  bssEndpoint: ""
+  # -- Ignore TLS verification for Huawei SDK HTTP clients
+  ignoreSSLVerification: false
 
 clusterInfo:
   # -- Cluster category: Optional. Enter "eni" for Turbo network types.
