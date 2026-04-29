@@ -43,6 +43,10 @@ controller:
   healthProbePort: 8081
 
 # Huawei Cloud credentials
+# The generated Secret uses HUAWEICLOUD_SDK_AK, HUAWEICLOUD_SDK_SK,
+# and HUAWEICLOUD_SDK_REGION_ID from this block, plus
+# HUAWEICLOUD_SDK_CCE_CLUSTER_ID from clusterInfo.clusterID.
+# If credentials.create=false, the existing Secret should provide the same keys.
 credentials:
   # -- Create a Secret for credentials
   create: true
@@ -56,10 +60,10 @@ credentials:
   secretKey: ""
   # -- Huawei Cloud region ID
   region: ""
-  # -- Huawei Cloud CCE cluster ID
-  clusterID: ""
 
 clusterInfo:
+  # -- Huawei Cloud CCE cluster ID
+  clusterID: ""
   # -- Cluster category: Optional. Enter "eni" for Turbo network types.
   # For other network types (vpc-router or overlay_l2), enter other values.
   category: ""

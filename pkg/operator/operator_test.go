@@ -17,6 +17,7 @@ limitations under the License.
 package operator
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -30,5 +31,41 @@ func TestBillingRegionUsesBusinessRegionIDWithBSSGlobalEndpoint(t *testing.T) {
 	}
 	if len(region.Endpoints) != 1 || region.Endpoints[0] != BillingEndpoint {
 		t.Fatalf("expected endpoints [%q], got %v", BillingEndpoint, region.Endpoints)
+	}
+}
+
+func TestBillingRegionUsesSDKEnvOverride(t *testing.T) {
+	t.Setenv("HUAWEICLOUD_SDK_REGION_BSS_CN_NORTH_4", "https://bss.custom.example.com")
+
+	region := billingRegion("cn-north-4")
+	if region == nil {
+		t.Fatalf("expected billing region to be constructed")
+	}
+	if len(region.Endpoints) != 1 || region.Endpoints[0] != "https://bss.custom.example.com" {
+		t.Fatalf("expected endpoints [%q], got %v", "https://bss.custom.example.com", region.Endpoints)
+	}
+}
+
+func TestSDKHTTPConfigUsesConfiguredIgnoreSSLVerification(t *testing.T) {
+	t.Setenv(IgnoreSSLEnv, "true")
+
+	httpConfig, err := sdkHTTPConfig()
+	if err != nil {
+		t.Fatalf("expected http config to be created, got %v", err)
+	}
+	if httpConfig == nil || !httpConfig.IgnoreSSLVerification {
+		t.Fatalf("expected ignore ssl verification to be true, got %#v", httpConfig)
+	}
+}
+
+func TestSDKHTTPConfigRejectsInvalidIgnoreSSLVerification(t *testing.T) {
+	t.Setenv(IgnoreSSLEnv, "definitely-not-a-bool")
+
+	_, err := sdkHTTPConfig()
+	if err == nil {
+		t.Fatalf("expected invalid bool value to return an error")
+	}
+	if !strings.Contains(err.Error(), IgnoreSSLEnv) {
+		t.Fatalf("expected error to mention %q, got %v", IgnoreSSLEnv, err)
 	}
 }

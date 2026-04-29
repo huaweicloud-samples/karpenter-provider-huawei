@@ -20,12 +20,15 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/basic"
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/global"
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/config"
 	coreRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/core/region"
+	bssRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/bss/v2/region"
 	cceRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cce/v3/region"
 	ecsRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/region"
 	vpcRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/region"
@@ -61,6 +64,7 @@ const (
 	// if it is not updated by a node creation event or refreshed during controller reconciliation
 	DiscoveredCapacityCacheTTL = 60 * 24 * time.Hour
 	BillingEndpoint            = "https://bss.myhuaweicloud.com"
+	IgnoreSSLEnv               = "HUAWEICLOUD_SDK_IGNORE_SSL_VERIFICATION"
 )
 
 // Operator is injected into the HuaweiCloud CloudProvider's factories
@@ -76,7 +80,9 @@ type Operator struct {
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
 	logger := log.FromContext(ctx)
 
-	reg := os.Getenv("HUAWEICLOUD_REGION")
+	projectId := os.Getenv("HUAWEICLOUD_SDK_PROJECT_ID")
+	domainId := os.Getenv("HUAWEICLOUD_SDK_DOMAIN_ID")
+	reg := os.Getenv("HUAWEICLOUD_SDK_REGION_ID")
 	vpcReg, err := vpcRegion.SafeValueOf(reg)
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get VPC region: %w", err))
@@ -89,17 +95,18 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get CCE region: %w", err))
 	}
-	ak := os.Getenv("HUAWEICLOUD_AK")
+	ak := os.Getenv("HUAWEICLOUD_SDK_AK")
 	if ak == "" {
-		lo.Must0(fmt.Errorf("unable to get credentials"))
+		lo.Must0(fmt.Errorf("missing required env: HUAWEICLOUD_SDK_AK"))
 	}
-	sk := os.Getenv("HUAWEICLOUD_SK")
+	sk := os.Getenv("HUAWEICLOUD_SDK_SK")
 	if sk == "" {
-		lo.Must0(fmt.Errorf("unable to get credentials"))
+		lo.Must0(fmt.Errorf("missing required env: HUAWEICLOUD_SDK_SK"))
 	}
 	credentialsBuilder := basic.NewCredentialsBuilder().
 		WithAk(ak).
-		WithSk(sk)
+		WithSk(sk).
+		WithProjectId(projectId)
 	credentials, err := credentialsBuilder.SafeBuild()
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get credentials"))
@@ -107,25 +114,31 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	globalCredentials, err := global.NewCredentialsBuilder().
 		WithAk(ak).
 		WithSk(sk).
+		WithDomainId(domainId).
 		SafeBuild()
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get global credentials"))
 	}
 
-	clusterID := os.Getenv("HUAWEICLOUD_CCE_CLUSTER_ID")
+	clusterID := os.Getenv("HUAWEICLOUD_SDK_CCE_CLUSTER_ID")
 	if clusterID == "" {
-		lo.Must0(fmt.Errorf("unable to get CCE cluster id"))
+		lo.Must0(fmt.Errorf("missing required env: HUAWEICLOUD_SDK_CCE_CLUSTER_ID"))
 	}
 
-	vpcApi := sdk.NewVPCService(vpcReg, credentials, config.DefaultHttpConfig())
+	httpConfig, err := sdkHTTPConfig()
+	if err != nil {
+		lo.Must0(err)
+	}
+
+	vpcApi := sdk.NewVPCService(vpcReg, credentials, httpConfig)
 	subnetProvider := subnet.NewDefaultProvider(vpcApi, cache.New(DefaultTTL, DefaultCleanupInterval), cache.New(AvailableIPAddressTTL, DefaultCleanupInterval))
 
 	versionProvider := version.NewDefaultProvider(operator.KubernetesInterface)
 	lo.Must0(versionProvider.UpdateVersionWithValidation(ctx))
 
-	ecsApi := sdk.NewECSService(ecsReg, credentials, config.DefaultHttpConfig())
-	bssApi := sdk.NewBSSService(billingRegion(reg), globalCredentials, config.DefaultHttpConfig())
-	cceApi := sdk.NewCCEService(cceReg, credentials, config.DefaultHttpConfig())
+	ecsApi := sdk.NewECSService(ecsReg, credentials, httpConfig)
+	bssApi := sdk.NewBSSService(billingRegion(reg), globalCredentials, httpConfig)
+	cceApi := sdk.NewCCEService(cceReg, credentials, httpConfig)
 	unavailableOfferingCache := utils.NewOfferingAvailabilityCache(UnavailableOfferingTTL, DefaultCleanupInterval)
 	instanceProvider := instance.NewDefaultProvider(clusterID, cceApi, ecsApi, subnetProvider, unavailableOfferingCache)
 	pricingProvider := pricing.NewDefaultProvider(bssApi, reg, func() string { return credentials.ProjectId })
@@ -154,6 +167,25 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	}
 }
 
+func sdkHTTPConfig() (*config.HttpConfig, error) {
+	httpConfig := config.DefaultHttpConfig()
+
+	raw := strings.TrimSpace(os.Getenv(IgnoreSSLEnv))
+	if raw == "" {
+		return httpConfig, nil
+	}
+
+	ignoreSSLVerification, err := strconv.ParseBool(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parsing %s: %w", IgnoreSSLEnv, err)
+	}
+	return httpConfig.WithIgnoreSSLVerification(ignoreSSLVerification), nil
+}
+
 func billingRegion(regionID string) *coreRegion.Region {
+	reg, err := bssRegion.SafeValueOf(regionID)
+	if err == nil && reg != nil {
+		return reg
+	}
 	return coreRegion.NewRegion(regionID, BillingEndpoint)
 }
