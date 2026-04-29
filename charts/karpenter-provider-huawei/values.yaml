@@ -68,26 +68,6 @@ clusterInfo:
   # For other network types (vpc-router or overlay_l2), enter other values.
   category: ""
 
-# Huawei Cloud SDK runtime settings
-sdk:
-  # -- Optional project ID to avoid IAM project auto-discovery
-  projectID: ""
-  # -- Optional domain ID to avoid IAM domain auto-discovery
-  domainID: ""
-  # -- Optional custom IAM endpoint
-  iamEndpoint: ""
-  # -- Ignore TLS verification for Huawei SDK HTTP clients
-  ignoreSSLVerification: false
-  endpoints:
-    # -- Optional custom ECS endpoint for credentials.region
-    ecs: ""
-    # -- Optional custom VPC endpoint for credentials.region
-    vpc: ""
-    # -- Optional custom CCE endpoint for credentials.region
-    cce: ""
-    # -- Optional custom BSS endpoint for credentials.region
-    bss: ""
-
 # -- yangtseEipInfo: Supports user-defined EIPs (Elastic IPs) bound to Karpenter pods.
 # This only takes effect when clusterInfo.category is set to "eni".
 yangtseEipInfo:

@@ -2,7 +2,7 @@
 
 ## Overview
 
-The CCE Karpenter Provider enables node autoprovisioning using [Karpenter](https://karpenter.sh/) on your CCE cluster.
+The Huawei Karpenter Provider enables node autoprovisioning using [Karpenter](https://karpenter.sh/) on your CCE cluster.
 Karpenter improves the efficiency and cost of running workloads on Kubernetes clusters by:
 
 * **Watching** for pods that the Kubernetes scheduler has marked as unschedulable
@@ -49,13 +49,6 @@ The chart creates a `huawei-credentials` Secret by default and loads it into the
 To use an existing Secret instead, set `credentials.create=false` and `credentials.existingSecret=<secret-name>`.
 When using an existing Secret, provide `HUAWEICLOUD_SDK_AK`, `HUAWEICLOUD_SDK_SK`, `HUAWEICLOUD_SDK_REGION_ID`, and
 `HUAWEICLOUD_SDK_CCE_CLUSTER_ID`.
-Optional SDK settings can be passed through Helm values or the existing Secret:
-`sdk.projectID`, `sdk.domainID`, `sdk.iamEndpoint`, `sdk.endpoints.ecs`,
-`sdk.endpoints.vpc`, `sdk.endpoints.cce`, `sdk.endpoints.bss`, and
-`sdk.ignoreSSLVerification`.
-For existing Secrets, service endpoint overrides use `HUAWEICLOUD_SDK_REGION_<SERVICE>_<REGION_ID>` keys such as
-`HUAWEICLOUD_SDK_REGION_ECS_AP_SOUTHEAST_3`, and TLS verification can be controlled with
-`HUAWEICLOUD_SDK_IGNORE_SSL_VERIFICATION`.
 
 The default controller image is:
 ```
