@@ -84,14 +84,14 @@ spec:
   subnetSelectorTerms:
     - id: "<subnet-uuid>"                  # Your VPC subnet ID
   imsSelector:
-    imsFamily: "HCE OS 2.0"                # OS family
+    imsFamily: "Huawei Cloud EulerOS 2.0"  # Example value verified on a live CCE cluster
   blockDeviceMappings:
     k8s:
       volumeSize: 120
       volumeType: SAS
     root:
       volumeSize: 120
-      volumeType: SATA
+      volumeType: SAS
     users:
       - volumeSize: 100
         volumeType: SAS

@@ -105,6 +105,27 @@ func TestNewInstanceType_UsesCCEMemoryReservationModel(t *testing.T) {
 	assertQuantityEqual(t, docker.Allocatable()[corev1.ResourceMemory], "6192Mi")
 }
 
+func TestNewInstanceType_KubeReservedUsesMemoryTierDefaultPodCount(t *testing.T) {
+	flavor := ecsMdl.Flavor{
+		Name:  "c9.large.2",
+		Ram:   4096,
+		Vcpus: "2",
+		OsExtraSpecs: &ecsMdl.FlavorExtraSpec{
+			QuotasubNetworkInterfaceMaxNum: stringPtr("16"),
+		},
+	}
+
+	containerd := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, nil, nil, nil, nil)
+	assertQuantityEqual(t, containerd.Capacity[corev1.ResourcePods], "16")
+	assertQuantityEqual(t, containerd.Overhead.KubeReserved[corev1.ResourceMemory], "600Mi")
+	assertQuantityEqual(t, containerd.Allocatable()[corev1.ResourceMemory], "2896Mi")
+
+	docker := NewInstanceType(flavor, "cn-north-4", nil, nil, "docker", nil, nil, nil, nil, nil, nil)
+	assertQuantityEqual(t, docker.Capacity[corev1.ResourcePods], "16")
+	assertQuantityEqual(t, docker.Overhead.KubeReserved[corev1.ResourceMemory], "900Mi")
+	assertQuantityEqual(t, docker.Allocatable()[corev1.ResourceMemory], "2596Mi")
+}
+
 func TestDefaultResolverCacheKeyIncludesRuntimeType(t *testing.T) {
 	resolver := NewDefaultResolver("cn-north-4")
 

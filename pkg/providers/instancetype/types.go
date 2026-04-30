@@ -122,13 +122,12 @@ func NewInstanceType(
 	evictionHard map[string]string,
 	evictionSoft map[string]string,
 ) *cloudprovider.InstanceType {
-	podCapacity := pods(info, maxPods, podsPerCore)
 	it := &cloudprovider.InstanceType{
 		Name:         info.Name,
 		Requirements: computeRequirements(info, region, offeringZones, subnetZones),
 		Capacity:     computeCapacity(info, maxPods, podsPerCore),
 		Overhead: &cloudprovider.InstanceTypeOverhead{
-			KubeReserved:      kubeReservedResources(cpu(info), podCapacity, runtimeType, kubeReserved),
+			KubeReserved:      kubeReservedResources(cpu(info), int64(info.Ram), runtimeType, kubeReserved),
 			SystemReserved:    systemReservedResources(int64(info.Ram), systemReserved),
 			EvictionThreshold: evictionThreshold(memory(info), evictionHard, evictionSoft),
 		},
@@ -214,8 +213,6 @@ func defaultMaxPods(info ecsMdl.Flavor) int64 {
 	if info.OsExtraSpecs == nil {
 		return count
 	}
-	// CCE Turbo's default maxPods is additionally capped by the flavor's
-	// supplementary NIC capacity, which matches the observed node pod capacity.
 	if nicCap, ok := parsePositiveInt64(info.OsExtraSpecs.QuotasubNetworkInterfaceMaxNum); ok {
 		return minInt64(count, nicCap)
 	}
@@ -266,12 +263,15 @@ func systemReservedMemoryMiB(memoryMiB int64) int64 {
 	return systemReservedBaseMemoryMiB + (memoryMiB*systemReservedPerGiBMiB)/1024
 }
 
-func kubeReservedMemoryMiB(podCount int64, runtimeType string) int64 {
+func kubeReservedMemoryMiB(memoryMiB int64, runtimeType string) int64 {
 	perPodMiB := containerdMemoryPerPodMiB
 	switch runtimeType {
 	case dockerRuntimeType:
 		perPodMiB = dockerMemoryPerPodMiB
 	}
+	// CCE's default v2 kubeReserved memory formula uses the memory-tier default
+	// pod count rather than the node's effective pod capacity.
+	podCount := defaultMaxPodsByMemoryMiB(memoryMiB)
 	return kubeReservedBaseMemoryMiB + (perPodMiB * podCount)
 }
 
@@ -335,9 +335,9 @@ func mustParsePercentage(v string) float64 {
 	return p
 }
 
-func kubeReservedResources(cpus, pods *resource.Quantity, runtimeType string, kubeReserved map[string]string) corev1.ResourceList {
+func kubeReservedResources(cpus *resource.Quantity, memoryMiB int64, runtimeType string, kubeReserved map[string]string) corev1.ResourceList {
 	resources := corev1.ResourceList{
-		corev1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dMi", kubeReservedMemoryMiB(pods.Value(), runtimeType))),
+		corev1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dMi", kubeReservedMemoryMiB(memoryMiB, runtimeType))),
 		corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"), // default kube-reserved ephemeral-storage
 	}
 	// CPU reservation follows the CCE node CPU reservation tiers.
