@@ -473,7 +473,9 @@ func TestCreateOfferings_UnavailableOfferingCacheExpires(t *testing.T) {
 }
 
 type fakeNodeClass struct {
-	zones []string
+	zones   []string
+	kubelet *v1alpha1.KubeletConfiguration
+	runtime *v1alpha1.RuntimeConfiguration
 }
 
 type fakeECSAPI struct {
@@ -483,7 +485,11 @@ type fakeECSAPI struct {
 }
 
 func (f fakeNodeClass) KubeletConfiguration() *v1alpha1.KubeletConfiguration {
-	return nil
+	return f.kubelet
+}
+
+func (f fakeNodeClass) RuntimeConfiguration() *v1alpha1.RuntimeConfiguration {
+	return f.runtime
 }
 
 func (f fakeNodeClass) Zones() []string {

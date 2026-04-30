@@ -42,6 +42,14 @@ const (
 	ChargeTypeOnDemand string = "on-demand"
 	MemoryAvailable           = "memory.available"
 	NodeFSAvailable           = "nodefs.available"
+
+	defaultRuntimeType                = "containerd"
+	dockerRuntimeType                 = "docker"
+	systemReservedBaseMemoryMiB int64 = 400
+	systemReservedPerGiBMiB     int64 = 25
+	kubeReservedBaseMemoryMiB   int64 = 500
+	dockerMemoryPerPodMiB       int64 = 20
+	containerdMemoryPerPodMiB   int64 = 5
 )
 
 type Resolver interface {
@@ -66,7 +74,13 @@ func (d *DefaultResolver) CacheKey(nodeClass NodeClass) string {
 	if resolved := nodeClass.KubeletConfiguration(); resolved != nil {
 		kc = resolved
 	}
-	kcHash, _ := hashstructure.Hash(kc, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
+	kcHash, _ := hashstructure.Hash(struct {
+		Kubelet     *v1alpha1.KubeletConfiguration
+		RuntimeType string
+	}{
+		Kubelet:     kc,
+		RuntimeType: normalizedRuntimeType(nodeClass.RuntimeConfiguration()),
+	}, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	return fmt.Sprintf("%016x", kcHash)
 }
 
@@ -79,11 +93,13 @@ func (d *DefaultResolver) Resolve(ctx context.Context, info ecsMdl.Flavor, zones
 	if resolved := nodeClass.KubeletConfiguration(); resolved != nil {
 		kc = resolved
 	}
+	runtimeType := normalizedRuntimeType(nodeClass.RuntimeConfiguration())
 	return NewInstanceType(
 		info,
 		d.region,
 		zones,
 		nodeClass.Zones(),
+		runtimeType,
 		kc.MaxPods,
 		kc.PodsPerCore,
 		kc.KubeReserved,
@@ -98,6 +114,7 @@ func NewInstanceType(
 	region string,
 	offeringZones []string,
 	subnetZones []string,
+	runtimeType string,
 	maxPods *int32,
 	podsPerCore *int32,
 	kubeReserved map[string]string,
@@ -105,13 +122,14 @@ func NewInstanceType(
 	evictionHard map[string]string,
 	evictionSoft map[string]string,
 ) *cloudprovider.InstanceType {
+	podCapacity := pods(info, maxPods, podsPerCore)
 	it := &cloudprovider.InstanceType{
 		Name:         info.Name,
 		Requirements: computeRequirements(info, region, offeringZones, subnetZones),
 		Capacity:     computeCapacity(info, maxPods, podsPerCore),
 		Overhead: &cloudprovider.InstanceTypeOverhead{
-			KubeReserved:      kubeReservedResources(cpu(info), pods(info, maxPods, podsPerCore), kubeReserved),
-			SystemReserved:    systemReservedResources(systemReserved),
+			KubeReserved:      kubeReservedResources(cpu(info), podCapacity, runtimeType, kubeReserved),
+			SystemReserved:    systemReservedResources(int64(info.Ram), systemReserved),
 			EvictionThreshold: evictionThreshold(memory(info), evictionHard, evictionSoft),
 		},
 	}
@@ -237,10 +255,33 @@ func minInt64(a, b int64) int64 {
 	return b
 }
 
-func systemReservedResources(systemReserved map[string]string) corev1.ResourceList {
-	return lo.MapEntries(systemReserved, func(k string, v string) (corev1.ResourceName, resource.Quantity) {
+func normalizedRuntimeType(runtimeConfiguration *v1alpha1.RuntimeConfiguration) string {
+	if runtimeConfiguration != nil && runtimeConfiguration.Type != "" {
+		return runtimeConfiguration.Type
+	}
+	return defaultRuntimeType
+}
+
+func systemReservedMemoryMiB(memoryMiB int64) int64 {
+	return systemReservedBaseMemoryMiB + (memoryMiB*systemReservedPerGiBMiB)/1024
+}
+
+func kubeReservedMemoryMiB(podCount int64, runtimeType string) int64 {
+	perPodMiB := containerdMemoryPerPodMiB
+	switch runtimeType {
+	case dockerRuntimeType:
+		perPodMiB = dockerMemoryPerPodMiB
+	}
+	return kubeReservedBaseMemoryMiB + (perPodMiB * podCount)
+}
+
+func systemReservedResources(memoryMiB int64, systemReserved map[string]string) corev1.ResourceList {
+	resources := corev1.ResourceList{
+		corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dMi", systemReservedMemoryMiB(memoryMiB))),
+	}
+	return lo.Assign(resources, lo.MapEntries(systemReserved, func(k string, v string) (corev1.ResourceName, resource.Quantity) {
 		return corev1.ResourceName(k), resource.MustParse(v)
-	})
+	}))
 }
 
 func evictionThreshold(memory *resource.Quantity, evictionHard map[string]string, evictionSoft map[string]string) corev1.ResourceList {
@@ -294,13 +335,12 @@ func mustParsePercentage(v string) float64 {
 	return p
 }
 
-func kubeReservedResources(cpus, pods *resource.Quantity, kubeReserved map[string]string) corev1.ResourceList {
+func kubeReservedResources(cpus, pods *resource.Quantity, runtimeType string, kubeReserved map[string]string) corev1.ResourceList {
 	resources := corev1.ResourceList{
-		corev1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dMi", (11*pods.Value())+255)),
+		corev1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dMi", kubeReservedMemoryMiB(pods.Value(), runtimeType))),
 		corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"), // default kube-reserved ephemeral-storage
 	}
-	// kube-reserved Computed from
-	// https://github.com/bottlerocket-os/bottlerocket/pull/1388/files#diff-bba9e4e3e46203be2b12f22e0d654ebd270f0b478dd34f40c31d7aa695620f2fR611
+	// CPU reservation follows the CCE node CPU reservation tiers.
 	for _, cpuRange := range []struct {
 		start      int64
 		end        int64

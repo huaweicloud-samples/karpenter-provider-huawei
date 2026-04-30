@@ -440,3 +440,7 @@ type KubeletConfiguration struct {
 func (in *CCENodeClass) KubeletConfiguration() *KubeletConfiguration {
 	return in.Spec.Kubelet
 }
+
+func (in *CCENodeClass) RuntimeConfiguration() *RuntimeConfiguration {
+	return in.Spec.RuntimeConfiguration
+}

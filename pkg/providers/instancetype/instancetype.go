@@ -47,6 +47,7 @@ const listFlavorsPageSize int32 = 1000
 
 type NodeClass interface {
 	KubeletConfiguration() *v1alpha1.KubeletConfiguration
+	RuntimeConfiguration() *v1alpha1.RuntimeConfiguration
 	Zones() []string
 }
 
