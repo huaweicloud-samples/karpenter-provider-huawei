@@ -49,6 +49,13 @@ const (
 	outOfStockMessage                = "out of stock"
 	soldOutMessage                   = "sold out"
 	sellOutMessage                   = "sell out"
+
+	defaultK8SDataVolumeSizeGiB  = int32(100)
+	storageSelectorName          = "k8s-data"
+	storageGroupName             = "vgpaas"
+	defaultRuntimeStorageSize    = "90%"
+	defaultKubernetesStorageSize = "10%"
+	defaultStorageLVType         = "linear"
 )
 
 type Provider interface {
@@ -280,6 +287,7 @@ func summarizeErrorMessage(msg string) string {
 func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.CCENodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, c createCandidate, osAlias string) *cceMdl.NodeSpec {
 	rootVolume := resolveRootVolume(nodeClass)
 	dataVolumes := resolveDataVolumes(nodeClass, rootVolume.Volumetype)
+	storage := resolveStorage(nodeClass, rootVolume.Volumetype)
 	login := resolveLogin(nodeClass)
 	runtime := resolveRuntime(nodeClass)
 	ecsGroupID := resolveECSGroupID(nodeClass)
@@ -302,6 +310,7 @@ func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.CCENodeClass,
 		Count:       lo.ToPtr(int32(1)),
 		RootVolume:  rootVolume,
 		DataVolumes: dataVolumes,
+		Storage:     storage,
 		Login:       login,
 		Runtime:     runtime,
 		EcsGroupId:  ecsGroupID,
@@ -325,7 +334,7 @@ func resolveDataVolumes(nodeClass *v1alpha1.CCENodeClass, rootVolumeType string)
 		volumes = append(volumes, *toCCEVolume(nodeClass.Spec.BlockDeviceMappings.K8S))
 	} else {
 		volumes = append(volumes, cceMdl.Volume{
-			Size:       100,
+			Size:       defaultK8SDataVolumeSizeGiB,
 			Volumetype: rootVolumeType,
 		})
 	}
@@ -338,10 +347,56 @@ func resolveDataVolumes(nodeClass *v1alpha1.CCENodeClass, rootVolumeType string)
 	return lo.ToPtr(volumes)
 }
 
-func toCCEVolume(device *v1alpha1.BlockDevice) *cceMdl.Volume {
-	if device == nil {
-		return nil
+func resolveStorage(nodeClass *v1alpha1.CCENodeClass, rootVolumeType string) *cceMdl.Storage {
+	managedVolume := cceMdl.Volume{
+		Size:       defaultK8SDataVolumeSizeGiB,
+		Volumetype: rootVolumeType,
 	}
+	if nodeClass.Spec.BlockDeviceMappings.K8S != nil {
+		managedVolume = *toCCEVolume(nodeClass.Spec.BlockDeviceMappings.K8S)
+	}
+	matchLabels := &cceMdl.StorageSelectorsMatchLabels{
+		Size:       lo.ToPtr(fmt.Sprint(managedVolume.Size)),
+		VolumeType: lo.ToPtr(managedVolume.Volumetype),
+		Count:      lo.ToPtr("1"),
+	}
+	if managedVolume.Iops != nil {
+		matchLabels.Iops = lo.ToPtr(fmt.Sprint(*managedVolume.Iops))
+	}
+	if managedVolume.Throughput != nil {
+		matchLabels.Throughput = lo.ToPtr(fmt.Sprint(*managedVolume.Throughput))
+	}
+	return &cceMdl.Storage{
+		StorageSelectors: []cceMdl.StorageSelectors{{
+			Name:        storageSelectorName,
+			StorageType: "evs",
+			MatchLabels: matchLabels,
+		}},
+		StorageGroups: []cceMdl.StorageGroups{{
+			Name:          storageGroupName,
+			CceManaged:    lo.ToPtr(true),
+			SelectorNames: []string{storageSelectorName},
+			VirtualSpaces: []cceMdl.VirtualSpace{
+				{
+					Name: "runtime",
+					Size: defaultRuntimeStorageSize,
+					RuntimeConfig: &cceMdl.RuntimeConfig{
+						LvType: defaultStorageLVType,
+					},
+				},
+				{
+					Name: "kubernetes",
+					Size: defaultKubernetesStorageSize,
+					LvmConfig: &cceMdl.LvmConfig{
+						LvType: defaultStorageLVType,
+					},
+				},
+			},
+		}},
+	}
+}
+
+func toCCEVolume(device *v1alpha1.BlockDevice) *cceMdl.Volume {
 	volumeType := strings.TrimSpace(device.VolumeType)
 	if volumeType == "" {
 		volumeType = "SSD"

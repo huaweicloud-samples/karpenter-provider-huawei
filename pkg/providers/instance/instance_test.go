@@ -302,6 +302,53 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 	if got := (*spec.DataVolumes)[1]; got.Size != userVolumeSize || got.Volumetype != "SATA" {
 		t.Fatalf("expected second data volume 100/SATA, got %#v", got)
 	}
+	if spec.Storage == nil {
+		t.Fatalf("expected storage to be set")
+	}
+	if len(spec.Storage.StorageSelectors) != 1 {
+		t.Fatalf("expected one storage selector, got %#v", spec.Storage.StorageSelectors)
+	}
+	selector := spec.Storage.StorageSelectors[0]
+	if selector.Name != storageSelectorName || selector.StorageType != "evs" {
+		t.Fatalf("expected k8s storage selector, got %#v", selector)
+	}
+	if selector.MatchLabels == nil {
+		t.Fatalf("expected selector match labels to be set")
+	}
+	if selector.MatchLabels.Size == nil || *selector.MatchLabels.Size != "120" {
+		t.Fatalf("expected selector size 120, got %#v", selector.MatchLabels.Size)
+	}
+	if selector.MatchLabels.VolumeType == nil || *selector.MatchLabels.VolumeType != "SAS" {
+		t.Fatalf("expected selector volume type SAS, got %#v", selector.MatchLabels.VolumeType)
+	}
+	if selector.MatchLabels.Iops == nil || *selector.MatchLabels.Iops != "4000" {
+		t.Fatalf("expected selector iops 4000, got %#v", selector.MatchLabels.Iops)
+	}
+	if selector.MatchLabels.Count == nil || *selector.MatchLabels.Count != "1" {
+		t.Fatalf("expected selector count 1, got %#v", selector.MatchLabels.Count)
+	}
+	if len(spec.Storage.StorageGroups) != 1 {
+		t.Fatalf("expected one storage group, got %#v", spec.Storage.StorageGroups)
+	}
+	group := spec.Storage.StorageGroups[0]
+	if group.Name != storageGroupName {
+		t.Fatalf("expected storage group %q, got %#v", storageGroupName, group.Name)
+	}
+	if group.CceManaged == nil || !*group.CceManaged {
+		t.Fatalf("expected storage group to be cce-managed, got %#v", group.CceManaged)
+	}
+	if len(group.SelectorNames) != 1 || group.SelectorNames[0] != storageSelectorName {
+		t.Fatalf("expected storage group to reference selector %q, got %#v", storageSelectorName, group.SelectorNames)
+	}
+	if len(group.VirtualSpaces) != 2 {
+		t.Fatalf("expected runtime and kubernetes virtual spaces, got %#v", group.VirtualSpaces)
+	}
+	if got := group.VirtualSpaces[0]; got.Name != "runtime" || got.Size != defaultRuntimeStorageSize || got.RuntimeConfig == nil || got.RuntimeConfig.LvType != defaultStorageLVType {
+		t.Fatalf("expected runtime virtual space to use default layout, got %#v", got)
+	}
+	if got := group.VirtualSpaces[1]; got.Name != "kubernetes" || got.Size != defaultKubernetesStorageSize || got.LvmConfig == nil || got.LvmConfig.LvType != defaultStorageLVType {
+		t.Fatalf("expected kubernetes virtual space to use default layout, got %#v", got)
+	}
 	if spec.Runtime == nil || spec.Runtime.Name == nil || spec.Runtime.Name.Value() != "docker" {
 		t.Fatalf("expected docker runtime, got %#v", spec.Runtime)
 	}
@@ -319,6 +366,55 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 	}
 	if spec.Os == nil || *spec.Os != "HCE OS 2.0" {
 		t.Fatalf("expected os %q, got %#v", "HCE OS 2.0", spec.Os)
+	}
+}
+
+func TestNodeSpecForCandidate_DefaultsManagedK8SDataDisk(t *testing.T) {
+	provider := &DefaultProvider{}
+	nodeClass := &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
+			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "HCE OS 2.0"},
+			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
+				Root: v1alpha1.BlockDevice{
+					VolumeSize: 120,
+					VolumeType: "SAS",
+				},
+			},
+			Login: v1alpha1.Login{
+				UserPassword: v1alpha1.UserPassword{
+					Password: "ciphertext",
+				},
+			},
+		},
+	}
+
+	spec := provider.nodeSpecForCandidate(
+		nodeClass,
+		&karpv1.NodeClaim{},
+		nil,
+		createCandidate{
+			instanceType: &cloudprovider.InstanceType{Name: "c9.large.2"},
+			zone:         "ap-southeast-3a",
+			subnetID:     "subnet-123",
+		},
+		"HCE OS 2.0",
+	)
+
+	if spec.DataVolumes == nil || len(*spec.DataVolumes) != 1 {
+		t.Fatalf("expected one default k8s data volume, got %#v", spec.DataVolumes)
+	}
+	if got := (*spec.DataVolumes)[0]; got.Size != defaultK8SDataVolumeSizeGiB || got.Volumetype != "SAS" {
+		t.Fatalf("expected default managed data volume 100/SAS, got %#v", got)
+	}
+	if spec.Storage == nil || len(spec.Storage.StorageSelectors) != 1 {
+		t.Fatalf("expected storage selector for default k8s volume, got %#v", spec.Storage)
+	}
+	selector := spec.Storage.StorageSelectors[0]
+	if selector.MatchLabels == nil || selector.MatchLabels.Size == nil || *selector.MatchLabels.Size != "100" {
+		t.Fatalf("expected default selector size 100, got %#v", selector.MatchLabels)
+	}
+	if selector.MatchLabels.VolumeType == nil || *selector.MatchLabels.VolumeType != "SAS" {
+		t.Fatalf("expected default selector volume type SAS, got %#v", selector.MatchLabels.VolumeType)
 	}
 }
 
