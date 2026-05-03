@@ -10,6 +10,15 @@ import (
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
 )
 
+func blockDeviceMappingsWithK8SVolume(size int32) v1alpha1.BlockDeviceMappings {
+	return v1alpha1.BlockDeviceMappings{
+		K8S: &v1alpha1.BlockDevice{
+			VolumeSize: size,
+			VolumeType: "SAS",
+		},
+	}
+}
+
 func TestDefaultMaxPodsByMemoryMiB(t *testing.T) {
 	testCases := []struct {
 		name      string
@@ -93,13 +102,13 @@ func TestNewInstanceType_UsesCCEMemoryReservationModel(t *testing.T) {
 		Vcpus: "2",
 	}
 
-	containerd := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, nil, nil, nil, nil)
+	containerd := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, v1alpha1.BlockDeviceMappings{}, nil, nil, nil, nil)
 	assertQuantityEqual(t, containerd.Overhead.SystemReserved[corev1.ResourceMemory], "600Mi")
 	assertQuantityEqual(t, containerd.Overhead.KubeReserved[corev1.ResourceMemory], "700Mi")
 	assertQuantityEqual(t, containerd.Overhead.EvictionThreshold[corev1.ResourceMemory], "100Mi")
 	assertQuantityEqual(t, containerd.Allocatable()[corev1.ResourceMemory], "6792Mi")
 
-	docker := NewInstanceType(flavor, "cn-north-4", nil, nil, "docker", nil, nil, nil, nil, nil, nil)
+	docker := NewInstanceType(flavor, "cn-north-4", nil, nil, "docker", nil, nil, v1alpha1.BlockDeviceMappings{}, nil, nil, nil, nil)
 	assertQuantityEqual(t, docker.Overhead.SystemReserved[corev1.ResourceMemory], "600Mi")
 	assertQuantityEqual(t, docker.Overhead.KubeReserved[corev1.ResourceMemory], "1300Mi")
 	assertQuantityEqual(t, docker.Allocatable()[corev1.ResourceMemory], "6192Mi")
@@ -115,15 +124,61 @@ func TestNewInstanceType_KubeReservedUsesMemoryTierDefaultPodCount(t *testing.T)
 		},
 	}
 
-	containerd := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, nil, nil, nil, nil)
+	containerd := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, v1alpha1.BlockDeviceMappings{}, nil, nil, nil, nil)
 	assertQuantityEqual(t, containerd.Capacity[corev1.ResourcePods], "16")
 	assertQuantityEqual(t, containerd.Overhead.KubeReserved[corev1.ResourceMemory], "600Mi")
 	assertQuantityEqual(t, containerd.Allocatable()[corev1.ResourceMemory], "2896Mi")
 
-	docker := NewInstanceType(flavor, "cn-north-4", nil, nil, "docker", nil, nil, nil, nil, nil, nil)
+	docker := NewInstanceType(flavor, "cn-north-4", nil, nil, "docker", nil, nil, v1alpha1.BlockDeviceMappings{}, nil, nil, nil, nil)
 	assertQuantityEqual(t, docker.Capacity[corev1.ResourcePods], "16")
 	assertQuantityEqual(t, docker.Overhead.KubeReserved[corev1.ResourceMemory], "900Mi")
 	assertQuantityEqual(t, docker.Allocatable()[corev1.ResourceMemory], "2596Mi")
+}
+
+func TestNewInstanceType_UsesK8SDataVolumeForEphemeralStorage(t *testing.T) {
+	flavor := ecsMdl.Flavor{
+		Name:  "c6.large.2",
+		Ram:   8192,
+		Vcpus: "2",
+	}
+
+	defaultDisk := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, v1alpha1.BlockDeviceMappings{}, nil, nil, nil, nil)
+	assertQuantityEqual(t, defaultDisk.Capacity[corev1.ResourceEphemeralStorage], "102396Mi")
+	if _, ok := defaultDisk.Overhead.KubeReserved[corev1.ResourceEphemeralStorage]; ok {
+		t.Fatalf("expected default kubeReserved to omit ephemeral-storage")
+	}
+	assertQuantityEqual(t, defaultDisk.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], "10736998810")
+	assertQuantityEqual(t, defaultDisk.Allocatable()[corev1.ResourceEphemeralStorage], "96632989286")
+
+	customDisk := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, blockDeviceMappingsWithK8SVolume(120), nil, nil, nil, nil)
+	assertQuantityEqual(t, customDisk.Capacity[corev1.ResourceEphemeralStorage], "122876Mi")
+}
+
+func TestNewInstanceType_UsesConfiguredEphemeralStorageReservations(t *testing.T) {
+	flavor := ecsMdl.Flavor{
+		Name:  "c6.large.2",
+		Ram:   8192,
+		Vcpus: "2",
+	}
+
+	it := NewInstanceType(
+		flavor,
+		"cn-north-4",
+		nil,
+		nil,
+		"containerd",
+		nil,
+		nil,
+		v1alpha1.BlockDeviceMappings{},
+		map[string]string{string(corev1.ResourceEphemeralStorage): "2Gi"},
+		map[string]string{string(corev1.ResourceEphemeralStorage): "1Gi"},
+		map[string]string{NodeFSAvailable: "5%"},
+		nil,
+	)
+
+	assertQuantityEqual(t, it.Overhead.KubeReserved[corev1.ResourceEphemeralStorage], "2Gi")
+	assertQuantityEqual(t, it.Overhead.SystemReserved[corev1.ResourceEphemeralStorage], "1Gi")
+	assertQuantityEqual(t, it.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], "5368499405")
 }
 
 func TestDefaultResolverCacheKeyIncludesRuntimeType(t *testing.T) {
@@ -142,6 +197,17 @@ func TestDefaultResolverCacheKeyIncludesRuntimeType(t *testing.T) {
 	}
 	if resolver.CacheKey(explicitContainerd) == resolver.CacheKey(docker) {
 		t.Fatalf("expected runtime type to affect cache key")
+	}
+}
+
+func TestDefaultResolverCacheKeyIncludesBlockDeviceMappings(t *testing.T) {
+	resolver := NewDefaultResolver("cn-north-4")
+
+	defaultDisk := fakeNodeClass{}
+	customDisk := fakeNodeClass{blockDeviceMappings: blockDeviceMappingsWithK8SVolume(120)}
+
+	if resolver.CacheKey(defaultDisk) == resolver.CacheKey(customDisk) {
+		t.Fatalf("expected block device mappings to affect cache key")
 	}
 }
 

@@ -444,3 +444,10 @@ func (in *CCENodeClass) KubeletConfiguration() *KubeletConfiguration {
 func (in *CCENodeClass) RuntimeConfiguration() *RuntimeConfiguration {
 	return in.Spec.RuntimeConfiguration
 }
+
+func (in *CCENodeClass) BlockDeviceMappings() BlockDeviceMappings {
+	if in == nil {
+		return BlockDeviceMappings{}
+	}
+	return in.Spec.BlockDeviceMappings
+}
