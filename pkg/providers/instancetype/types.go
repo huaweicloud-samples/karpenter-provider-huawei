@@ -46,6 +46,7 @@ const (
 	defaultRuntimeType                   = "containerd"
 	dockerRuntimeType                    = "docker"
 	defaultNodeFSEvictionThreshold       = "10%"
+	bytesPerGiB                    int64 = 1024 * 1024 * 1024
 	dataVolumeMetadataReservedMiB  int64 = 4
 	systemReservedBaseMemoryMiB    int64 = 400
 	systemReservedPerGiBMiB        int64 = 25
@@ -205,8 +206,58 @@ func ephemeralStorage(blockDeviceMappings v1alpha1.BlockDeviceMappings) *resourc
 	if blockDeviceMappings.K8S != nil && blockDeviceMappings.K8S.VolumeSize > 0 {
 		sizeGiB = blockDeviceMappings.K8S.VolumeSize
 	}
-	mib := int64(sizeGiB)*1024 - dataVolumeMetadataReservedMiB
-	return resource.NewQuantity(mib*1024*1024, resource.BinarySI)
+
+	// CCE mounts the managed data volume as an ext4 filesystem on /mnt/paas.
+	// kubelet reports the filesystem capacity rather than the raw managed LV size.
+	lvSizeBytes := int64(sizeGiB)*bytesPerGiB - dataVolumeMetadataReservedMiB*1024*1024
+	return resource.NewQuantity(ext4FilesystemSizeBytes(lvSizeBytes), resource.BinarySI)
+}
+
+func ext4FilesystemSizeBytes(deviceSizeBytes int64) int64 {
+	const (
+		blockSizeBytes           int64 = 4096
+		blocksPerGroup           int64 = 32768
+		groupsPerDescriptorBlock int64 = 64
+		metadataBlocksPerGroup   int64 = 514
+		fixedMetadataBlocks      int64 = 146432
+	)
+
+	if deviceSizeBytes <= 0 {
+		return 0
+	}
+	blockCount := deviceSizeBytes / blockSizeBytes
+	if blockCount == 0 {
+		return 0
+	}
+	groupCount := ceilDiv(blockCount, blocksPerGroup)
+	descriptorBlocksPerCopy := ceilDiv(groupCount, groupsPerDescriptorBlock)
+	sparseSuperBlocks := sparseSuperGroupCopies(groupCount) * (1 + descriptorBlocksPerCopy)
+	overheadBlocks := groupCount*metadataBlocksPerGroup + fixedMetadataBlocks + sparseSuperBlocks
+	return deviceSizeBytes - overheadBlocks*blockSizeBytes
+}
+
+func sparseSuperGroupCopies(groupCount int64) int64 {
+	if groupCount <= 0 {
+		return 0
+	}
+	copies := int64(2)
+	for _, base := range []int64{3, 5, 7} {
+		for group := base; group < groupCount; {
+			copies++
+			if group > (groupCount-1)/base {
+				break
+			}
+			group *= base
+		}
+	}
+	return copies
+}
+
+func ceilDiv(a, b int64) int64 {
+	if a <= 0 {
+		return 0
+	}
+	return (a + b - 1) / b
 }
 
 func pods(info ecsMdl.Flavor, maxPods *int32, podsPerCore *int32) *resource.Quantity {

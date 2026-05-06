@@ -143,15 +143,15 @@ func TestNewInstanceType_UsesK8SDataVolumeForEphemeralStorage(t *testing.T) {
 	}
 
 	defaultDisk := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, v1alpha1.BlockDeviceMappings{}, nil, nil, nil, nil)
-	assertQuantityEqual(t, defaultDisk.Capacity[corev1.ResourceEphemeralStorage], "102396Mi")
+	assertQuantityEqual(t, defaultDisk.Capacity[corev1.ResourceEphemeralStorage], "102622136Ki")
 	if _, ok := defaultDisk.Overhead.KubeReserved[corev1.ResourceEphemeralStorage]; ok {
 		t.Fatalf("expected default kubeReserved to omit ephemeral-storage")
 	}
-	assertQuantityEqual(t, defaultDisk.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], "10736998810")
-	assertQuantityEqual(t, defaultDisk.Allocatable()[corev1.ResourceEphemeralStorage], "96632989286")
+	assertQuantityEqual(t, defaultDisk.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], "10508506727")
+	assertQuantityEqual(t, defaultDisk.Allocatable()[corev1.ResourceEphemeralStorage], "94576560537")
 
 	customDisk := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, blockDeviceMappingsWithK8SVolume(120), nil, nil, nil, nil)
-	assertQuantityEqual(t, customDisk.Capacity[corev1.ResourceEphemeralStorage], "122876Mi")
+	assertQuantityEqual(t, customDisk.Capacity[corev1.ResourceEphemeralStorage], "123264576Ki")
 }
 
 func TestNewInstanceType_UsesConfiguredEphemeralStorageReservations(t *testing.T) {
@@ -178,7 +178,7 @@ func TestNewInstanceType_UsesConfiguredEphemeralStorageReservations(t *testing.T
 
 	assertQuantityEqual(t, it.Overhead.KubeReserved[corev1.ResourceEphemeralStorage], "2Gi")
 	assertQuantityEqual(t, it.Overhead.SystemReserved[corev1.ResourceEphemeralStorage], "1Gi")
-	assertQuantityEqual(t, it.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], "5368499405")
+	assertQuantityEqual(t, it.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], "5254253364")
 }
 
 func TestDefaultResolverCacheKeyIncludesRuntimeType(t *testing.T) {
