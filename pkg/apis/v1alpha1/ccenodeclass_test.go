@@ -164,3 +164,30 @@ func TestCCENodeClassSpecValidateForCreateNode(t *testing.T) {
 		}
 	})
 }
+
+func TestCCENodeClassBlockDeviceMappings(t *testing.T) {
+	t.Run("returns zero mappings for nil nodeclass", func(t *testing.T) {
+		var nodeClass *CCENodeClass
+		if got := nodeClass.BlockDeviceMappings(); got.K8S != nil || got.Root != (BlockDevice{}) || len(got.Users) != 0 {
+			t.Fatalf("expected zero block device mappings, got %+v", got)
+		}
+	})
+
+	t.Run("returns spec block device mappings", func(t *testing.T) {
+		nodeClass := &CCENodeClass{
+			Spec: CCENodeClassSpec{
+				BlockDeviceMappings: BlockDeviceMappings{
+					K8S:  &BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
+					Root: BlockDevice{VolumeSize: 40, VolumeType: "SSD"},
+				},
+			},
+		}
+		got := nodeClass.BlockDeviceMappings()
+		if got.K8S == nil || got.K8S.VolumeSize != 120 {
+			t.Fatalf("expected explicit k8s block device mappings, got %+v", got)
+		}
+		if got.Root.VolumeSize != 40 {
+			t.Fatalf("expected root block device mappings to be preserved, got %+v", got)
+		}
+	})
+}

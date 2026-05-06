@@ -43,13 +43,15 @@ const (
 	MemoryAvailable           = "memory.available"
 	NodeFSAvailable           = "nodefs.available"
 
-	defaultRuntimeType                = "containerd"
-	dockerRuntimeType                 = "docker"
-	systemReservedBaseMemoryMiB int64 = 400
-	systemReservedPerGiBMiB     int64 = 25
-	kubeReservedBaseMemoryMiB   int64 = 500
-	dockerMemoryPerPodMiB       int64 = 20
-	containerdMemoryPerPodMiB   int64 = 5
+	defaultRuntimeType                   = "containerd"
+	dockerRuntimeType                    = "docker"
+	defaultNodeFSEvictionThreshold       = "10%"
+	dataVolumeMetadataReservedMiB  int64 = 4
+	systemReservedBaseMemoryMiB    int64 = 400
+	systemReservedPerGiBMiB        int64 = 25
+	kubeReservedBaseMemoryMiB      int64 = 500
+	dockerMemoryPerPodMiB          int64 = 20
+	containerdMemoryPerPodMiB      int64 = 5
 )
 
 type Resolver interface {
@@ -75,11 +77,13 @@ func (d *DefaultResolver) CacheKey(nodeClass NodeClass) string {
 		kc = resolved
 	}
 	kcHash, _ := hashstructure.Hash(struct {
-		Kubelet     *v1alpha1.KubeletConfiguration
-		RuntimeType string
+		Kubelet             *v1alpha1.KubeletConfiguration
+		RuntimeType         string
+		BlockDeviceMappings v1alpha1.BlockDeviceMappings
 	}{
-		Kubelet:     kc,
-		RuntimeType: normalizedRuntimeType(nodeClass.RuntimeConfiguration()),
+		Kubelet:             kc,
+		RuntimeType:         normalizedRuntimeType(nodeClass.RuntimeConfiguration()),
+		BlockDeviceMappings: nodeClass.BlockDeviceMappings(),
 	}, hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	return fmt.Sprintf("%016x", kcHash)
 }
@@ -102,6 +106,7 @@ func (d *DefaultResolver) Resolve(ctx context.Context, info ecsMdl.Flavor, zones
 		runtimeType,
 		kc.MaxPods,
 		kc.PodsPerCore,
+		nodeClass.BlockDeviceMappings(),
 		kc.KubeReserved,
 		kc.SystemReserved,
 		kc.EvictionHard,
@@ -117,6 +122,7 @@ func NewInstanceType(
 	runtimeType string,
 	maxPods *int32,
 	podsPerCore *int32,
+	blockDeviceMappings v1alpha1.BlockDeviceMappings,
 	kubeReserved map[string]string,
 	systemReserved map[string]string,
 	evictionHard map[string]string,
@@ -125,11 +131,11 @@ func NewInstanceType(
 	it := &cloudprovider.InstanceType{
 		Name:         info.Name,
 		Requirements: computeRequirements(info, region, offeringZones, subnetZones),
-		Capacity:     computeCapacity(info, maxPods, podsPerCore),
+		Capacity:     computeCapacity(info, maxPods, podsPerCore, blockDeviceMappings),
 		Overhead: &cloudprovider.InstanceTypeOverhead{
 			KubeReserved:      kubeReservedResources(cpu(info), int64(info.Ram), runtimeType, kubeReserved),
 			SystemReserved:    systemReservedResources(int64(info.Ram), systemReserved),
-			EvictionThreshold: evictionThreshold(memory(info), evictionHard, evictionSoft),
+			EvictionThreshold: evictionThreshold(memory(info), ephemeralStorage(blockDeviceMappings), evictionHard, evictionSoft),
 		},
 	}
 	return it
@@ -169,11 +175,12 @@ func computeRequirements(info ecsMdl.Flavor, region string, offeringZones []stri
 	return requirements
 }
 
-func computeCapacity(info ecsMdl.Flavor, maxPods *int32, podsPerCore *int32) corev1.ResourceList {
+func computeCapacity(info ecsMdl.Flavor, maxPods *int32, podsPerCore *int32, blockDeviceMappings v1alpha1.BlockDeviceMappings) corev1.ResourceList {
 	resourceList := corev1.ResourceList{
-		corev1.ResourceCPU:    *cpu(info),
-		corev1.ResourceMemory: *memory(info),
-		corev1.ResourcePods:   *pods(info, maxPods, podsPerCore),
+		corev1.ResourceCPU:              *cpu(info),
+		corev1.ResourceMemory:           *memory(info),
+		corev1.ResourcePods:             *pods(info, maxPods, podsPerCore),
+		corev1.ResourceEphemeralStorage: *ephemeralStorage(blockDeviceMappings),
 	}
 	return resourceList
 }
@@ -191,6 +198,15 @@ func cpu(info ecsMdl.Flavor) *resource.Quantity {
 
 func memory(info ecsMdl.Flavor) *resource.Quantity {
 	return resources.Quantity(fmt.Sprintf("%dMi", info.Ram))
+}
+
+func ephemeralStorage(blockDeviceMappings v1alpha1.BlockDeviceMappings) *resource.Quantity {
+	sizeGiB := v1alpha1.MinDataVolumeSizeGiB
+	if blockDeviceMappings.K8S != nil && blockDeviceMappings.K8S.VolumeSize > 0 {
+		sizeGiB = blockDeviceMappings.K8S.VolumeSize
+	}
+	mib := int64(sizeGiB)*1024 - dataVolumeMetadataReservedMiB
+	return resource.NewQuantity(mib*1024*1024, resource.BinarySI)
 }
 
 func pods(info ecsMdl.Flavor, maxPods *int32, podsPerCore *int32) *resource.Quantity {
@@ -284,9 +300,10 @@ func systemReservedResources(memoryMiB int64, systemReserved map[string]string) 
 	}))
 }
 
-func evictionThreshold(memory *resource.Quantity, evictionHard map[string]string, evictionSoft map[string]string) corev1.ResourceList {
+func evictionThreshold(memory *resource.Quantity, ephemeralStorage *resource.Quantity, evictionHard map[string]string, evictionSoft map[string]string) corev1.ResourceList {
 	overhead := corev1.ResourceList{
-		corev1.ResourceMemory: resource.MustParse("100Mi"),
+		corev1.ResourceMemory:           resource.MustParse("100Mi"),
+		corev1.ResourceEphemeralStorage: computeEvictionSignal(*ephemeralStorage, defaultNodeFSEvictionThreshold),
 	}
 
 	override := corev1.ResourceList{}
@@ -302,6 +319,9 @@ func evictionThreshold(memory *resource.Quantity, evictionHard map[string]string
 		temp := corev1.ResourceList{}
 		if v, ok := m[MemoryAvailable]; ok {
 			temp[corev1.ResourceMemory] = computeEvictionSignal(*memory, v)
+		}
+		if v, ok := m[NodeFSAvailable]; ok {
+			temp[corev1.ResourceEphemeralStorage] = computeEvictionSignal(*ephemeralStorage, v)
 		}
 		override = resources.MaxResources(override, temp)
 	}
@@ -337,8 +357,7 @@ func mustParsePercentage(v string) float64 {
 
 func kubeReservedResources(cpus *resource.Quantity, memoryMiB int64, runtimeType string, kubeReserved map[string]string) corev1.ResourceList {
 	resources := corev1.ResourceList{
-		corev1.ResourceMemory:           resource.MustParse(fmt.Sprintf("%dMi", kubeReservedMemoryMiB(memoryMiB, runtimeType))),
-		corev1.ResourceEphemeralStorage: resource.MustParse("1Gi"), // default kube-reserved ephemeral-storage
+		corev1.ResourceMemory: resource.MustParse(fmt.Sprintf("%dMi", kubeReservedMemoryMiB(memoryMiB, runtimeType))),
 	}
 	// CPU reservation follows the CCE node CPU reservation tiers.
 	for _, cpuRange := range []struct {
