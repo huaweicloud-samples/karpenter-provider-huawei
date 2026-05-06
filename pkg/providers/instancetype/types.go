@@ -47,12 +47,15 @@ const (
 	dockerRuntimeType                    = "docker"
 	defaultNodeFSEvictionThreshold       = "10%"
 	bytesPerGiB                    int64 = 1024 * 1024 * 1024
+	lvmExtentSizeBytes             int64 = 4 * 1024 * 1024
 	dataVolumeMetadataReservedMiB  int64 = 4
-	systemReservedBaseMemoryMiB    int64 = 400
-	systemReservedPerGiBMiB        int64 = 25
-	kubeReservedBaseMemoryMiB      int64 = 500
-	dockerMemoryPerPodMiB          int64 = 20
-	containerdMemoryPerPodMiB      int64 = 5
+	// Keep this aligned with pkg/providers/instance/instance.go defaultKubernetesStorageSize.
+	defaultKubernetesVirtualSpacePercent int64 = 10
+	systemReservedBaseMemoryMiB          int64 = 400
+	systemReservedPerGiBMiB              int64 = 25
+	kubeReservedBaseMemoryMiB            int64 = 500
+	dockerMemoryPerPodMiB                int64 = 20
+	containerdMemoryPerPodMiB            int64 = 5
 )
 
 type Resolver interface {
@@ -207,10 +210,11 @@ func ephemeralStorage(blockDeviceMappings v1alpha1.BlockDeviceMappings) *resourc
 		sizeGiB = blockDeviceMappings.K8S.VolumeSize
 	}
 
-	// CCE mounts the managed data volume as an ext4 filesystem on /mnt/paas.
-	// kubelet reports the filesystem capacity rather than the raw managed LV size.
+	// CCE's default storage layout splits the managed data volume into runtime and kubernetes LVs.
+	// kubelet reports nodefs from /mnt/paas/kubernetes/kubelet (kubernetes LV), not the full managed LV.
 	lvSizeBytes := int64(sizeGiB)*bytesPerGiB - dataVolumeMetadataReservedMiB*1024*1024
-	return resource.NewQuantity(ext4FilesystemSizeBytes(lvSizeBytes), resource.BinarySI)
+	kubernetesLVSizeBytes := kubernetesLVSize(lvSizeBytes)
+	return resource.NewQuantity(ext4FilesystemSizeBytes(kubernetesLVSizeBytes), resource.BinarySI)
 }
 
 func ext4FilesystemSizeBytes(deviceSizeBytes int64) int64 {
@@ -219,7 +223,8 @@ func ext4FilesystemSizeBytes(deviceSizeBytes int64) int64 {
 		blocksPerGroup           int64 = 32768
 		groupsPerDescriptorBlock int64 = 64
 		metadataBlocksPerGroup   int64 = 514
-		fixedMetadataBlocks      int64 = 146432
+		// Calibrated against live CCE nodes' nodefs (/mnt/paas/kubernetes/kubelet) capacity.
+		fixedMetadataBlocks int64 = 26624
 	)
 
 	if deviceSizeBytes <= 0 {
@@ -234,6 +239,22 @@ func ext4FilesystemSizeBytes(deviceSizeBytes int64) int64 {
 	sparseSuperBlocks := sparseSuperGroupCopies(groupCount) * (1 + descriptorBlocksPerCopy)
 	overheadBlocks := groupCount*metadataBlocksPerGroup + fixedMetadataBlocks + sparseSuperBlocks
 	return deviceSizeBytes - overheadBlocks*blockSizeBytes
+}
+
+func kubernetesLVSize(managedLVSizeBytes int64) int64 {
+	if managedLVSizeBytes <= 0 {
+		return 0
+	}
+	alignedManaged := alignDown(managedLVSizeBytes, lvmExtentSizeBytes)
+	kubernetesBytes := (alignedManaged * defaultKubernetesVirtualSpacePercent) / 100
+	return alignDown(kubernetesBytes, lvmExtentSizeBytes)
+}
+
+func alignDown(v, unit int64) int64 {
+	if v <= 0 || unit <= 0 {
+		return 0
+	}
+	return (v / unit) * unit
 }
 
 func sparseSuperGroupCopies(groupCount int64) int64 {
