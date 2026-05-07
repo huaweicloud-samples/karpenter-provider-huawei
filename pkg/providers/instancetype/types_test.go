@@ -142,29 +142,35 @@ func TestNewInstanceType_UsesK8SDataVolumeForEphemeralStorage(t *testing.T) {
 		Vcpus: "2",
 	}
 
-	defaultDisk := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, v1alpha1.BlockDeviceMappings{}, nil, nil, nil, nil)
-	assertQuantityEqual(t, defaultDisk.Capacity[corev1.ResourceEphemeralStorage], "10210580Ki")
+	testCases := []struct {
+		name            string
+		mappings        v1alpha1.BlockDeviceMappings
+		wantCapacity    string
+		wantEviction    string
+		wantAllocatable string
+	}{
+		{name: "default 100Gi", mappings: v1alpha1.BlockDeviceMappings{}, wantCapacity: "10214676Ki", wantEviction: "1045982837", wantAllocatable: "9413845387"},
+		{name: "120Gi", mappings: blockDeviceMappingsWithK8SVolume(120), wantCapacity: "12274824Ki", wantEviction: "1256941996", wantAllocatable: "11312477780"},
+		{name: "150Gi", mappings: blockDeviceMappingsWithK8SVolume(150), wantCapacity: "15371208Ki", wantEviction: "1574011722", wantAllocatable: "14166105270"},
+		{name: "190Gi", mappings: blockDeviceMappingsWithK8SVolume(190), wantCapacity: "19430032Ki", wantEviction: "1989635306", wantAllocatable: "17906717462"},
+		{name: "230Gi", mappings: blockDeviceMappingsWithK8SVolume(230), wantCapacity: "23558544Ki", wantEviction: "2412394941", wantAllocatable: "21711554115"},
+		{name: "320Gi", mappings: blockDeviceMappingsWithK8SVolume(320), wantCapacity: "32843536Ki", wantEviction: "3363178136", wantAllocatable: "30268602728"},
+		{name: "450Gi", mappings: blockDeviceMappingsWithK8SVolume(450), wantCapacity: "46125908Ki", wantEviction: "4723293049", wantAllocatable: "42509636743"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			it := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, tc.mappings, nil, nil, nil, nil)
+			assertQuantityEqual(t, it.Capacity[corev1.ResourceEphemeralStorage], tc.wantCapacity)
+			assertQuantityEqual(t, it.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], tc.wantEviction)
+			assertQuantityEqual(t, it.Allocatable()[corev1.ResourceEphemeralStorage], tc.wantAllocatable)
+		})
+	}
+
+	defaultDisk := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, testCases[0].mappings, nil, nil, nil, nil)
 	if _, ok := defaultDisk.Overhead.KubeReserved[corev1.ResourceEphemeralStorage]; ok {
 		t.Fatalf("expected default kubeReserved to omit ephemeral-storage")
 	}
-	assertQuantityEqual(t, defaultDisk.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], "1045563392")
-	assertQuantityEqual(t, defaultDisk.Allocatable()[corev1.ResourceEphemeralStorage], "9189522Ki")
-
-	customDisk := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, blockDeviceMappingsWithK8SVolume(120), nil, nil, nil, nil)
-	assertQuantityEqual(t, customDisk.Capacity[corev1.ResourceEphemeralStorage], "12274824Ki")
-}
-
-func TestNewInstanceType_UsesK8SDataVolumeForEphemeralStorage150Gi(t *testing.T) {
-	flavor := ecsMdl.Flavor{
-		Name:  "c6.large.2",
-		Ram:   8192,
-		Vcpus: "2",
-	}
-
-	disk150 := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, blockDeviceMappingsWithK8SVolume(150), nil, nil, nil, nil)
-	assertQuantityEqual(t, disk150.Capacity[corev1.ResourceEphemeralStorage], "15371208Ki")
-	assertQuantityEqual(t, disk150.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], "1574011700")
-	assertQuantityEqual(t, disk150.Allocatable()[corev1.ResourceEphemeralStorage], "14166105292")
 }
 
 func TestNewInstanceType_UsesConfiguredEphemeralStorageReservations(t *testing.T) {
@@ -191,7 +197,7 @@ func TestNewInstanceType_UsesConfiguredEphemeralStorageReservations(t *testing.T
 
 	assertQuantityEqual(t, it.Overhead.KubeReserved[corev1.ResourceEphemeralStorage], "2Gi")
 	assertQuantityEqual(t, it.Overhead.SystemReserved[corev1.ResourceEphemeralStorage], "1Gi")
-	assertQuantityEqual(t, it.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], "522781696")
+	assertQuantityEqual(t, it.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], "522991418")
 }
 
 func TestDefaultResolverCacheKeyIncludesRuntimeType(t *testing.T) {
