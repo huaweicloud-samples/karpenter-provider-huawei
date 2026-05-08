@@ -19,7 +19,6 @@ package instancetype
 import (
 	"context"
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 
@@ -46,12 +45,21 @@ const (
 	defaultRuntimeType                   = "containerd"
 	dockerRuntimeType                    = "docker"
 	defaultNodeFSEvictionThreshold       = "10%"
+	bytesPerGiB                    int64 = 1024 * 1024 * 1024
+	lvmExtentSizeBytes             int64 = 4 * 1024 * 1024
+	ext4BlockSizeBytes             int64 = 4096
 	dataVolumeMetadataReservedMiB  int64 = 4
-	systemReservedBaseMemoryMiB    int64 = 400
-	systemReservedPerGiBMiB        int64 = 25
-	kubeReservedBaseMemoryMiB      int64 = 500
-	dockerMemoryPerPodMiB          int64 = 20
-	containerdMemoryPerPodMiB      int64 = 5
+	// Keep this aligned with pkg/providers/instance/instance.go defaultKubernetesStorageSize.
+	defaultKubernetesVirtualSpacePercent int64 = 10
+	ext4BlocksPerGroup                   int64 = 32768
+	ext4GroupsPerDescriptorBlock         int64 = 64
+	ext4InodeBlocksPerGroup              int64 = 512
+	ext4PointersPerBlock                 int64 = ext4BlockSizeBytes / 4
+	systemReservedBaseMemoryMiB          int64 = 400
+	systemReservedPerGiBMiB              int64 = 25
+	kubeReservedBaseMemoryMiB            int64 = 500
+	dockerMemoryPerPodMiB                int64 = 20
+	containerdMemoryPerPodMiB            int64 = 5
 )
 
 type Resolver interface {
@@ -205,8 +213,115 @@ func ephemeralStorage(blockDeviceMappings v1alpha1.BlockDeviceMappings) *resourc
 	if blockDeviceMappings.K8S != nil && blockDeviceMappings.K8S.VolumeSize > 0 {
 		sizeGiB = blockDeviceMappings.K8S.VolumeSize
 	}
-	mib := int64(sizeGiB)*1024 - dataVolumeMetadataReservedMiB
-	return resource.NewQuantity(mib*1024*1024, resource.BinarySI)
+
+	// CCE's default storage layout splits the managed data volume into runtime and kubernetes LVs.
+	// kubelet reports nodefs from /mnt/paas/kubernetes/kubelet (kubernetes LV), not the full managed LV.
+	lvSizeBytes := int64(sizeGiB)*bytesPerGiB - dataVolumeMetadataReservedMiB*1024*1024
+	kubernetesLVSizeBytes := kubernetesLVSize(lvSizeBytes)
+	return resource.NewQuantity(ext4FilesystemSizeBytes(kubernetesLVSizeBytes), resource.BinarySI)
+}
+
+func ext4FilesystemSizeBytes(deviceSizeBytes int64) int64 {
+	if deviceSizeBytes <= 0 {
+		return 0
+	}
+	blockCount := deviceSizeBytes / ext4BlockSizeBytes
+	if blockCount == 0 {
+		return 0
+	}
+	groupCount := ceilDiv(blockCount, ext4BlocksPerGroup)
+	descriptorBlocks := ceilDiv(groupCount, ext4GroupsPerDescriptorBlock)
+	backupSuperGroupCount := sparseSuperGroupCopies(groupCount)
+	reservedGDTBlocks := ext4ReservedGDTBlocks(blockCount, descriptorBlocks)
+	journalBlocks := ext4DefaultJournalBlocks(blockCount)
+
+	// Match e2fsprogs (mke2fs 1.47.0) overhead accounting for ext4 with:
+	// - base block/inode bitmaps + inode table in every group
+	// - superblock/GDT/reserved GDT in backup-super groups
+	// - default internal journal size
+	overheadBlocks := groupCount*(2+ext4InodeBlocksPerGroup) +
+		backupSuperGroupCount*(1+descriptorBlocks+reservedGDTBlocks) +
+		journalBlocks
+	return deviceSizeBytes - overheadBlocks*ext4BlockSizeBytes
+}
+
+func kubernetesLVSize(managedLVSizeBytes int64) int64 {
+	if managedLVSizeBytes <= 0 {
+		return 0
+	}
+	alignedManaged := alignDown(managedLVSizeBytes, lvmExtentSizeBytes)
+	kubernetesBytes := (alignedManaged * defaultKubernetesVirtualSpacePercent) / 100
+	return alignDown(kubernetesBytes, lvmExtentSizeBytes)
+}
+
+func alignDown(v, unit int64) int64 {
+	if v <= 0 || unit <= 0 {
+		return 0
+	}
+	return (v / unit) * unit
+}
+
+func sparseSuperGroupCopies(groupCount int64) int64 {
+	if groupCount <= 0 {
+		return 0
+	}
+	copies := int64(2)
+	for _, base := range []int64{3, 5, 7} {
+		for group := base; group < groupCount; {
+			copies++
+			if group > (groupCount-1)/base {
+				break
+			}
+			group *= base
+		}
+	}
+	return copies
+}
+
+func ext4ReservedGDTBlocks(blockCount, descriptorBlocks int64) int64 {
+	if blockCount <= 0 {
+		return 0
+	}
+	maxBlocks := int64(0xffffffff)
+	if blockCount < maxBlocks/1024 {
+		maxBlocks = blockCount * 1024
+	}
+	reservedGroups := ceilDiv(maxBlocks, ext4BlocksPerGroup)
+	reservedGDTBlocks := ceilDiv(reservedGroups, ext4GroupsPerDescriptorBlock) - descriptorBlocks
+	if reservedGDTBlocks < 0 {
+		return 0
+	}
+	return minInt64(reservedGDTBlocks, ext4PointersPerBlock)
+}
+
+func ext4DefaultJournalBlocks(blockCount int64) int64 {
+	switch {
+	case blockCount < 2048:
+		return 0
+	case blockCount < 32768:
+		return 1024
+	case blockCount < 256*1024:
+		return 4096
+	case blockCount < 512*1024:
+		return 8192
+	case blockCount < 4096*1024:
+		return 16384
+	case blockCount < 8192*1024:
+		return 32768
+	case blockCount < 16384*1024:
+		return 65536
+	case blockCount < 32768*1024:
+		return 131072
+	default:
+		return 262144
+	}
+}
+
+func ceilDiv(a, b int64) int64 {
+	if a <= 0 {
+		return 0
+	}
+	return (a + b - 1) / b
 }
 
 func pods(info ecsMdl.Flavor, maxPods *int32, podsPerCore *int32) *resource.Quantity {
@@ -334,25 +449,22 @@ func evictionThreshold(memory *resource.Quantity, ephemeralStorage *resource.Qua
 func computeEvictionSignal(capacity resource.Quantity, signalValue string) resource.Quantity {
 	if strings.HasSuffix(signalValue, "%") {
 		p := mustParsePercentage(signalValue)
-
-		// Calculation is node.capacity * signalValue if percentage
-		// From https://kubernetes.io/docs/concepts/scheduling-eviction/node-pressure-eviction/#eviction-signals
-		return resource.MustParse(fmt.Sprint(math.Ceil(capacity.AsApproximateFloat64() / 100 * p)))
+		return *resource.NewQuantity(int64(float64(capacity.Value())*float64(p)), resource.BinarySI)
 	}
 	return resource.MustParse(signalValue)
 }
 
-func mustParsePercentage(v string) float64 {
-	p, err := strconv.ParseFloat(strings.Trim(v, "%"), 64)
+func mustParsePercentage(v string) float32 {
+	p, err := strconv.ParseFloat(strings.Trim(v, "%"), 32)
 	if err != nil {
 		panic(fmt.Sprintf("expected percentage value to be a float but got %s, %v", v, err))
 	}
 	// Setting percentage value to 100% is considered disabling the threshold according to
 	// https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/
 	if p == 100 {
-		p = 0
+		return 0
 	}
-	return p
+	return float32(p) / 100
 }
 
 func kubeReservedResources(cpus *resource.Quantity, memoryMiB int64, runtimeType string, kubeReserved map[string]string) corev1.ResourceList {
