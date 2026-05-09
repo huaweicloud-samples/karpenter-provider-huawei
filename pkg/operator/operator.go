@@ -26,6 +26,7 @@ import (
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/basic"
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/global"
+	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/auth/provider"
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/config"
 	coreRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/core/region"
 	bssRegion "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/bss/v2/region"
@@ -80,8 +81,6 @@ type Operator struct {
 func NewOperator(ctx context.Context, operator *operator.Operator) (context.Context, *Operator) {
 	logger := log.FromContext(ctx)
 
-	projectId := os.Getenv("HUAWEICLOUD_SDK_PROJECT_ID")
-	domainId := os.Getenv("HUAWEICLOUD_SDK_DOMAIN_ID")
 	reg := os.Getenv("HUAWEICLOUD_SDK_REGION_ID")
 	vpcReg, err := vpcRegion.SafeValueOf(reg)
 	if err != nil {
@@ -95,30 +94,19 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	if err != nil {
 		lo.Must0(fmt.Errorf("unable to get CCE region: %w", err))
 	}
-	ak := os.Getenv("HUAWEICLOUD_SDK_AK")
-	if ak == "" {
-		lo.Must0(fmt.Errorf("missing required env: HUAWEICLOUD_SDK_AK"))
-	}
-	sk := os.Getenv("HUAWEICLOUD_SDK_SK")
-	if sk == "" {
-		lo.Must0(fmt.Errorf("missing required env: HUAWEICLOUD_SDK_SK"))
-	}
-	credentialsBuilder := basic.NewCredentialsBuilder().
-		WithAk(ak).
-		WithSk(sk).
-		WithProjectId(projectId)
-	credentials, err := credentialsBuilder.SafeBuild()
+	cred, err := provider.BasicCredentialProviderChain().GetCredentials()
 	if err != nil {
-		lo.Must0(fmt.Errorf("unable to get credentials"))
+		lo.Must0(fmt.Errorf("unable to get basic credentials: %w", err))
 	}
-	globalCredentials, err := global.NewCredentialsBuilder().
-		WithAk(ak).
-		WithSk(sk).
-		WithDomainId(domainId).
-		SafeBuild()
+	credentials, ok := cred.(*basic.Credentials)
+	lo.Must0(ok, "unexpected basic credentials type: %T", cred)
+
+	globalCred, err := provider.GlobalCredentialProviderChain().GetCredentials()
 	if err != nil {
-		lo.Must0(fmt.Errorf("unable to get global credentials"))
+		lo.Must0(fmt.Errorf("unable to get global credentials: %w", err))
 	}
+	globalCredentials, ok := globalCred.(*global.Credentials)
+	lo.Must0(ok, "unexpected global credentials type: %T", globalCred)
 
 	clusterID := os.Getenv("HUAWEICLOUD_SDK_CCE_CLUSTER_ID")
 	if clusterID == "" {
