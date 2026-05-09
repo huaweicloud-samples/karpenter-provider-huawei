@@ -74,18 +74,27 @@ spec:
         securityContext:
           {{- toYaml . | nindent 10 }}
         {{- end }}
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: {{ .Values.controller.healthProbePort }}
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
         livenessProbe:
           httpGet:
             path: /healthz
             port: {{ .Values.controller.healthProbePort }}
-          initialDelaySeconds: 15
           periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
         readinessProbe:
           httpGet:
             path: /readyz
             port: {{ .Values.controller.healthProbePort }}
-          initialDelaySeconds: 5
           periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
         {{- with .Values.resources }}
         resources:
           {{- toYaml . | nindent 10 }}

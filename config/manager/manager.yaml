@@ -92,18 +92,27 @@ spec:
           capabilities:
             drop:
             - "ALL"
+        startupProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 30
         livenessProbe:
           httpGet:
             path: /healthz
             port: 8081
-          initialDelaySeconds: 15
           periodSeconds: 20
+          timeoutSeconds: 5
+          failureThreshold: 3
         readinessProbe:
           httpGet:
             path: /readyz
             port: 8081
-          initialDelaySeconds: 5
           periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
         # TODO(user): Configure the resources accordingly based on the project requirements.
         # More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
         resources:
