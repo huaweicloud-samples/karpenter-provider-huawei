@@ -58,7 +58,7 @@ const (
 	DefaultCleanupInterval = time.Minute
 	// AvailableIPAddressTTL is time to drop AvailableIPAddress data if it is not updated within the TTL
 	AvailableIPAddressTTL = 5 * time.Minute
-	// InstanceTypesZonesAndOfferingsTTL is the time before we refresh instance types, zones, and offerings at EC2
+	// InstanceTypesZonesAndOfferingsTTL is the time before we refresh instance types, zones, and offerings
 	InstanceTypesZonesAndOfferingsTTL = 5 * time.Minute
 	// UnavailableOfferingTTL is the duration to suppress recently sold-out offerings from scheduling.
 	UnavailableOfferingTTL = 5 * time.Minute
