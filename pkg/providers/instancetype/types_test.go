@@ -102,13 +102,13 @@ func TestNewInstanceType_UsesCCEMemoryReservationModel(t *testing.T) {
 		Vcpus: "2",
 	}
 
-	containerd := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, v1alpha1.BlockDeviceMappings{}, nil, nil, nil, nil)
+	containerd := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, v1alpha1.BlockDeviceMappings{}, nil, nil)
 	assertQuantityEqual(t, containerd.Overhead.SystemReserved[corev1.ResourceMemory], "600Mi")
 	assertQuantityEqual(t, containerd.Overhead.KubeReserved[corev1.ResourceMemory], "700Mi")
 	assertQuantityEqual(t, containerd.Overhead.EvictionThreshold[corev1.ResourceMemory], "100Mi")
 	assertQuantityEqual(t, containerd.Allocatable()[corev1.ResourceMemory], "6792Mi")
 
-	docker := NewInstanceType(flavor, "cn-north-4", nil, nil, "docker", nil, nil, v1alpha1.BlockDeviceMappings{}, nil, nil, nil, nil)
+	docker := NewInstanceType(flavor, "cn-north-4", nil, nil, "docker", nil, v1alpha1.BlockDeviceMappings{}, nil, nil)
 	assertQuantityEqual(t, docker.Overhead.SystemReserved[corev1.ResourceMemory], "600Mi")
 	assertQuantityEqual(t, docker.Overhead.KubeReserved[corev1.ResourceMemory], "1300Mi")
 	assertQuantityEqual(t, docker.Allocatable()[corev1.ResourceMemory], "6192Mi")
@@ -124,12 +124,12 @@ func TestNewInstanceType_KubeReservedUsesMemoryTierDefaultPodCount(t *testing.T)
 		},
 	}
 
-	containerd := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, v1alpha1.BlockDeviceMappings{}, nil, nil, nil, nil)
+	containerd := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, v1alpha1.BlockDeviceMappings{}, nil, nil)
 	assertQuantityEqual(t, containerd.Capacity[corev1.ResourcePods], "16")
 	assertQuantityEqual(t, containerd.Overhead.KubeReserved[corev1.ResourceMemory], "600Mi")
 	assertQuantityEqual(t, containerd.Allocatable()[corev1.ResourceMemory], "2896Mi")
 
-	docker := NewInstanceType(flavor, "cn-north-4", nil, nil, "docker", nil, nil, v1alpha1.BlockDeviceMappings{}, nil, nil, nil, nil)
+	docker := NewInstanceType(flavor, "cn-north-4", nil, nil, "docker", nil, v1alpha1.BlockDeviceMappings{}, nil, nil)
 	assertQuantityEqual(t, docker.Capacity[corev1.ResourcePods], "16")
 	assertQuantityEqual(t, docker.Overhead.KubeReserved[corev1.ResourceMemory], "900Mi")
 	assertQuantityEqual(t, docker.Allocatable()[corev1.ResourceMemory], "2596Mi")
@@ -160,14 +160,14 @@ func TestNewInstanceType_UsesK8SDataVolumeForEphemeralStorage(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			it := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, tc.mappings, nil, nil, nil, nil)
+			it := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, tc.mappings, nil, nil)
 			assertQuantityEqual(t, it.Capacity[corev1.ResourceEphemeralStorage], tc.wantCapacity)
 			assertQuantityEqual(t, it.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], tc.wantEviction)
 			assertQuantityEqual(t, it.Allocatable()[corev1.ResourceEphemeralStorage], tc.wantAllocatable)
 		})
 	}
 
-	defaultDisk := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, nil, testCases[0].mappings, nil, nil, nil, nil)
+	defaultDisk := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", nil, testCases[0].mappings, nil, nil)
 	if _, ok := defaultDisk.Overhead.KubeReserved[corev1.ResourceEphemeralStorage]; ok {
 		t.Fatalf("expected default kubeReserved to omit ephemeral-storage")
 	}
@@ -187,17 +187,26 @@ func TestNewInstanceType_UsesConfiguredEphemeralStorageReservations(t *testing.T
 		nil,
 		"containerd",
 		nil,
-		nil,
 		v1alpha1.BlockDeviceMappings{},
 		map[string]string{string(corev1.ResourceEphemeralStorage): "2Gi"},
 		map[string]string{string(corev1.ResourceEphemeralStorage): "1Gi"},
-		map[string]string{NodeFSAvailable: "5%"},
-		nil,
 	)
 
 	assertQuantityEqual(t, it.Overhead.KubeReserved[corev1.ResourceEphemeralStorage], "2Gi")
 	assertQuantityEqual(t, it.Overhead.SystemReserved[corev1.ResourceEphemeralStorage], "1Gi")
-	assertQuantityEqual(t, it.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], "522991418")
+	assertQuantityEqual(t, it.Overhead.EvictionThreshold[corev1.ResourceEphemeralStorage], "1045982837")
+}
+
+func TestNewInstanceType_UsesExplicitMaxPods(t *testing.T) {
+	flavor := ecsMdl.Flavor{
+		Name:  "c9.large.2",
+		Ram:   16384,
+		Vcpus: "2",
+	}
+	maxPods := int32(48)
+
+	it := NewInstanceType(flavor, "cn-north-4", nil, nil, "containerd", &maxPods, v1alpha1.BlockDeviceMappings{}, nil, nil)
+	assertQuantityEqual(t, it.Capacity[corev1.ResourcePods], "48")
 }
 
 func TestDefaultResolverCacheKeyIncludesRuntimeType(t *testing.T) {

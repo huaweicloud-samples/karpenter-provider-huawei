@@ -39,8 +39,6 @@ import (
 const (
 	ChargeTypeSpot     string = "spot"
 	ChargeTypeOnDemand string = "on-demand"
-	MemoryAvailable           = "memory.available"
-	NodeFSAvailable           = "nodefs.available"
 
 	defaultRuntimeType                   = "containerd"
 	dockerRuntimeType                    = "docker"
@@ -113,12 +111,9 @@ func (d *DefaultResolver) Resolve(ctx context.Context, info ecsMdl.Flavor, zones
 		nodeClass.Zones(),
 		runtimeType,
 		kc.MaxPods,
-		kc.PodsPerCore,
 		nodeClass.BlockDeviceMappings(),
 		kc.KubeReserved,
 		kc.SystemReserved,
-		kc.EvictionHard,
-		kc.EvictionSoft,
 	)
 }
 
@@ -129,21 +124,18 @@ func NewInstanceType(
 	subnetZones []string,
 	runtimeType string,
 	maxPods *int32,
-	podsPerCore *int32,
 	blockDeviceMappings v1alpha1.BlockDeviceMappings,
 	kubeReserved map[string]string,
 	systemReserved map[string]string,
-	evictionHard map[string]string,
-	evictionSoft map[string]string,
 ) *cloudprovider.InstanceType {
 	it := &cloudprovider.InstanceType{
 		Name:         info.Name,
 		Requirements: computeRequirements(info, region, offeringZones, subnetZones),
-		Capacity:     computeCapacity(info, maxPods, podsPerCore, blockDeviceMappings),
+		Capacity:     computeCapacity(info, maxPods, blockDeviceMappings),
 		Overhead: &cloudprovider.InstanceTypeOverhead{
 			KubeReserved:      kubeReservedResources(cpu(info), int64(info.Ram), runtimeType, kubeReserved),
 			SystemReserved:    systemReservedResources(int64(info.Ram), systemReserved),
-			EvictionThreshold: evictionThreshold(memory(info), ephemeralStorage(blockDeviceMappings), evictionHard, evictionSoft),
+			EvictionThreshold: evictionThreshold(ephemeralStorage(blockDeviceMappings)),
 		},
 	}
 	return it
@@ -183,11 +175,11 @@ func computeRequirements(info ecsMdl.Flavor, region string, offeringZones []stri
 	return requirements
 }
 
-func computeCapacity(info ecsMdl.Flavor, maxPods *int32, podsPerCore *int32, blockDeviceMappings v1alpha1.BlockDeviceMappings) corev1.ResourceList {
+func computeCapacity(info ecsMdl.Flavor, maxPods *int32, blockDeviceMappings v1alpha1.BlockDeviceMappings) corev1.ResourceList {
 	resourceList := corev1.ResourceList{
 		corev1.ResourceCPU:              *cpu(info),
 		corev1.ResourceMemory:           *memory(info),
-		corev1.ResourcePods:             *pods(info, maxPods, podsPerCore),
+		corev1.ResourcePods:             *pods(info, maxPods),
 		corev1.ResourceEphemeralStorage: *ephemeralStorage(blockDeviceMappings),
 	}
 	return resourceList
@@ -324,17 +316,13 @@ func ceilDiv(a, b int64) int64 {
 	return (a + b - 1) / b
 }
 
-func pods(info ecsMdl.Flavor, maxPods *int32, podsPerCore *int32) *resource.Quantity {
+func pods(info ecsMdl.Flavor, maxPods *int32) *resource.Quantity {
 	var count int64
 	switch {
 	case maxPods != nil:
 		count = int64(lo.FromPtr(maxPods))
 	default:
 		count = defaultMaxPods(info)
-	}
-	if lo.FromPtr(podsPerCore) > 0 {
-		vcpus, _ := strconv.Atoi(info.Vcpus)
-		count = lo.Min([]int64{int64(lo.FromPtr(podsPerCore)) * int64(vcpus), count})
 	}
 	return resources.Quantity(fmt.Sprint(count))
 }
@@ -415,33 +403,11 @@ func systemReservedResources(memoryMiB int64, systemReserved map[string]string) 
 	}))
 }
 
-func evictionThreshold(memory *resource.Quantity, ephemeralStorage *resource.Quantity, evictionHard map[string]string, evictionSoft map[string]string) corev1.ResourceList {
-	overhead := corev1.ResourceList{
+func evictionThreshold(ephemeralStorage *resource.Quantity) corev1.ResourceList {
+	return corev1.ResourceList{
 		corev1.ResourceMemory:           resource.MustParse("100Mi"),
 		corev1.ResourceEphemeralStorage: computeEvictionSignal(*ephemeralStorage, defaultNodeFSEvictionThreshold),
 	}
-
-	override := corev1.ResourceList{}
-	var evictionSignals []map[string]string
-	if evictionHard != nil {
-		evictionSignals = append(evictionSignals, evictionHard)
-	}
-	if evictionSoft != nil {
-		evictionSignals = append(evictionSignals, evictionSoft)
-	}
-
-	for _, m := range evictionSignals {
-		temp := corev1.ResourceList{}
-		if v, ok := m[MemoryAvailable]; ok {
-			temp[corev1.ResourceMemory] = computeEvictionSignal(*memory, v)
-		}
-		if v, ok := m[NodeFSAvailable]; ok {
-			temp[corev1.ResourceEphemeralStorage] = computeEvictionSignal(*ephemeralStorage, v)
-		}
-		override = resources.MaxResources(override, temp)
-	}
-	// Assign merges maps from left to right so overrides will always be taken last
-	return lo.Assign(overhead, override)
 }
 
 // computeEvictionSignal computes the resource quantity value for an eviction signal value, computed off the
