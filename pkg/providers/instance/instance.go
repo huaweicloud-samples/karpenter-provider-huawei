@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/sdkerr"
@@ -28,6 +29,7 @@ import (
 	ecsMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/model"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	karpv1 "sigs.k8s.io/karpenter/pkg/apis/v1"
@@ -55,7 +57,24 @@ const (
 	defaultRuntimeStorageSize    = "90%"
 	defaultKubernetesStorageSize = "10%"
 	defaultStorageLVType         = "linear"
+
+	minCreateNodeMaxPods        = int32(16)
+	maxCreateNodeMaxPods        = int32(256)
+	bytesPerMiB           int64 = 1024 * 1024
+	bytesPerGiB           int64 = 1024 * 1024 * 1024
+	maxCreateNodeIntValue       = int64(2147483647)
 )
+
+type reservedValues struct {
+	CPU     *int32
+	Memory  *int32
+	PID     *int32
+	Storage *int32
+}
+
+func (v reservedValues) Empty() bool {
+	return v.CPU == nil && v.Memory == nil && v.PID == nil && v.Storage == nil
+}
 
 type Provider interface {
 	Create(context.Context, *v1alpha1.CCENodeClass, *karpv1.NodeClaim, map[string]string, []*cloudprovider.InstanceType) (*Instance, error)
@@ -147,12 +166,16 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.CCENod
 
 	var lastUnavailableErr error
 	for _, c := range filteredCandidates {
+		spec, err := p.nodeSpecForCandidate(nodeClass, nodeClaim, tags, c, osAlias)
+		if err != nil {
+			return nil, err
+		}
 		resp, err := p.cceapi.CreateNode(&cceMdl.CreateNodeRequest{
 			ClusterId: p.clusterID,
 			Body: &cceMdl.NodeCreateRequest{
 				Kind:       "Node",
 				ApiVersion: "v3",
-				Spec:       p.nodeSpecForCandidate(nodeClass, nodeClaim, tags, c, osAlias),
+				Spec:       spec,
 			},
 		})
 		if err != nil {
@@ -283,13 +306,17 @@ func summarizeErrorMessage(msg string) string {
 	return msg[:157] + "..."
 }
 
-func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.CCENodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, c createCandidate, osAlias string) *cceMdl.NodeSpec {
+func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.CCENodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, c createCandidate, osAlias string) (*cceMdl.NodeSpec, error) {
 	rootVolume := resolveRootVolume(nodeClass)
 	dataVolumes := resolveDataVolumes(nodeClass, rootVolume.Volumetype)
 	storage := resolveStorage(nodeClass, rootVolume.Volumetype)
 	login := resolveLogin(nodeClass)
 	runtime := resolveRuntime(nodeClass)
 	ecsGroupID := resolveECSGroupID(nodeClass)
+	extendParam, err := resolveCreateNodeKubelet(nodeClass)
+	if err != nil {
+		return nil, err
+	}
 
 	k8sTags := map[string]string{}
 	for k, v := range tags {
@@ -312,6 +339,7 @@ func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.CCENodeClass,
 		Storage:     storage,
 		Login:       login,
 		Runtime:     runtime,
+		ExtendParam: extendParam,
 		EcsGroupId:  ecsGroupID,
 		OffloadNode: lo.ToPtr(true),
 		NodeNicSpec: &cceMdl.NodeNicSpec{
@@ -320,7 +348,140 @@ func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.CCENodeClass,
 		Taints:  toCCETaints(nodeClaim),
 		K8sTags: k8sTags,
 	}
-	return spec
+	return spec, nil
+}
+
+func ValidateKubeletForCreateNode(nodeClass *v1alpha1.CCENodeClass) error {
+	if nodeClass == nil || nodeClass.Spec.Kubelet == nil {
+		return nil
+	}
+	kubelet := nodeClass.Spec.Kubelet
+	if kubelet.MaxPods != nil && (*kubelet.MaxPods < minCreateNodeMaxPods || *kubelet.MaxPods > maxCreateNodeMaxPods) {
+		return fmt.Errorf("nodeClass.spec.kubelet.maxPods must be between %d and %d", minCreateNodeMaxPods, maxCreateNodeMaxPods)
+	}
+	if _, err := parseReservedValues("nodeClass.spec.kubelet.kubeReserved", kubelet.KubeReserved); err != nil {
+		return err
+	}
+	if _, err := parseReservedValues("nodeClass.spec.kubelet.systemReserved", kubelet.SystemReserved); err != nil {
+		return err
+	}
+	return nil
+}
+
+func resolveCreateNodeKubelet(nodeClass *v1alpha1.CCENodeClass) (*cceMdl.NodeExtendParam, error) {
+	if nodeClass == nil || nodeClass.Spec.Kubelet == nil {
+		return nil, nil
+	}
+	if err := ValidateKubeletForCreateNode(nodeClass); err != nil {
+		return nil, err
+	}
+	kubeReserved, err := parseReservedValues("nodeClass.spec.kubelet.kubeReserved", nodeClass.Spec.Kubelet.KubeReserved)
+	if err != nil {
+		return nil, err
+	}
+	systemReserved, err := parseReservedValues("nodeClass.spec.kubelet.systemReserved", nodeClass.Spec.Kubelet.SystemReserved)
+	if err != nil {
+		return nil, err
+	}
+	if nodeClass.Spec.Kubelet.MaxPods == nil && kubeReserved.Empty() && systemReserved.Empty() {
+		return nil, nil
+	}
+	return &cceMdl.NodeExtendParam{
+		MaxPods:               nodeClass.Spec.Kubelet.MaxPods,
+		KubeReservedCpu:       kubeReserved.CPU,
+		KubeReservedMem:       kubeReserved.Memory,
+		KubeReservedPid:       kubeReserved.PID,
+		KubeReservedStorage:   kubeReserved.Storage,
+		SystemReservedCpu:     systemReserved.CPU,
+		SystemReservedMem:     systemReserved.Memory,
+		SystemReservedPid:     systemReserved.PID,
+		SystemReservedStorage: systemReserved.Storage,
+	}, nil
+}
+
+func parseReservedValues(fieldPath string, values map[string]string) (reservedValues, error) {
+	out := reservedValues{}
+	for key, value := range values {
+		keyPath := fieldPath + "." + key
+		switch key {
+		case string(corev1.ResourceCPU):
+			v, err := parseQuantityAsMilliValue(keyPath, value)
+			if err != nil {
+				return reservedValues{}, err
+			}
+			out.CPU = lo.ToPtr(v)
+		case string(corev1.ResourceMemory):
+			v, err := parseQuantityAsBinaryUnitValue(keyPath, value, bytesPerMiB, "Mi")
+			if err != nil {
+				return reservedValues{}, err
+			}
+			out.Memory = lo.ToPtr(v)
+		case string(corev1.ResourceEphemeralStorage):
+			v, err := parseQuantityAsBinaryUnitValue(keyPath, value, bytesPerGiB, "Gi")
+			if err != nil {
+				return reservedValues{}, err
+			}
+			out.Storage = lo.ToPtr(v)
+		case "pid":
+			v, err := parsePIDValue(keyPath, value)
+			if err != nil {
+				return reservedValues{}, err
+			}
+			out.PID = lo.ToPtr(v)
+		default:
+			return reservedValues{}, fmt.Errorf("%s uses unsupported key %q", fieldPath, key)
+		}
+	}
+	return out, nil
+}
+
+func parseQuantityAsMilliValue(fieldPath string, value string) (int32, error) {
+	quantity, err := resource.ParseQuantity(strings.TrimSpace(value))
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid CPU quantity: %w", fieldPath, err)
+	}
+	milliValue := quantity.MilliValue()
+	roundTrip := resource.MustParse(fmt.Sprintf("%dm", milliValue))
+	if roundTrip.Cmp(quantity) != 0 {
+		return 0, fmt.Errorf("%s must convert exactly to mcore", fieldPath)
+	}
+	return toCreateNodeInt32(fieldPath, milliValue)
+}
+
+func parseQuantityAsBinaryUnitValue(fieldPath string, value string, unitBytes int64, unitName string) (int32, error) {
+	quantity, err := resource.ParseQuantity(strings.TrimSpace(value))
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid resource quantity: %w", fieldPath, err)
+	}
+	baseValue := quantity.Value()
+	if baseValue%unitBytes != 0 {
+		return 0, fmt.Errorf("%s must convert exactly to %s", fieldPath, unitName)
+	}
+	unitValue := baseValue / unitBytes
+	roundTrip := resource.MustParse(fmt.Sprintf("%d%s", unitValue, unitName))
+	if roundTrip.Cmp(quantity) != 0 {
+		return 0, fmt.Errorf("%s must convert exactly to %s", fieldPath, unitName)
+	}
+	return toCreateNodeInt32(fieldPath, unitValue)
+}
+
+func parsePIDValue(fieldPath string, value string) (int32, error) {
+	trimmed := strings.TrimSpace(value)
+	pidValue, err := strconv.ParseInt(trimmed, 10, 32)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be a valid integer: %w", fieldPath, err)
+	}
+	return toCreateNodeInt32(fieldPath, pidValue)
+}
+
+func toCreateNodeInt32(fieldPath string, value int64) (int32, error) {
+	if value < 0 {
+		return 0, fmt.Errorf("%s must be non-negative", fieldPath)
+	}
+	if value > maxCreateNodeIntValue {
+		return 0, fmt.Errorf("%s exceeds the maximum supported value %d", fieldPath, maxCreateNodeIntValue)
+	}
+	return int32(value), nil
 }
 
 func resolveRootVolume(nodeClass *v1alpha1.CCENodeClass) *cceMdl.Volume {

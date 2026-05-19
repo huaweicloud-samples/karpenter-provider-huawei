@@ -239,6 +239,7 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 	k8sIOPS := int32(4000)
 	userVolumeSize := int32(100)
 	ecsGroupID := "46ebaf04-ca42-48ca-8057-0b96e6126e1b"
+	maxPods := int32(64)
 	provider := &DefaultProvider{}
 	nodeClass := &v1alpha1.CCENodeClass{
 		Spec: v1alpha1.CCENodeClassSpec{
@@ -262,6 +263,21 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 				}},
 			},
 			RuntimeConfiguration: &v1alpha1.RuntimeConfiguration{Type: "docker"},
+			Kubelet: &v1alpha1.KubeletConfiguration{
+				MaxPods: &maxPods,
+				KubeReserved: map[string]string{
+					string(corev1.ResourceCPU):              "1500m",
+					string(corev1.ResourceMemory):           "1Gi",
+					string(corev1.ResourceEphemeralStorage): "2Gi",
+					"pid":                                   "1234",
+				},
+				SystemReserved: map[string]string{
+					string(corev1.ResourceCPU):              "250m",
+					string(corev1.ResourceMemory):           "512Mi",
+					string(corev1.ResourceEphemeralStorage): "1Gi",
+					"pid":                                   "4321",
+				},
+			},
 			Login: v1alpha1.Login{
 				UserPassword: v1alpha1.UserPassword{
 					Password: "ciphertext",
@@ -270,7 +286,7 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 		},
 	}
 	nodeClaim := &karpv1.NodeClaim{}
-	spec := provider.nodeSpecForCandidate(
+	spec, err := provider.nodeSpecForCandidate(
 		nodeClass,
 		nodeClaim,
 		nil,
@@ -281,6 +297,9 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 		},
 		"HCE OS 2.0",
 	)
+	if err != nil {
+		t.Fatalf("expected node spec creation to succeed, got %v", err)
+	}
 	if spec.RootVolume == nil {
 		t.Fatalf("expected root volume to be set")
 	}
@@ -367,6 +386,36 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 	if spec.Os == nil || *spec.Os != "HCE OS 2.0" {
 		t.Fatalf("expected os %q, got %#v", "HCE OS 2.0", spec.Os)
 	}
+	if spec.ExtendParam == nil {
+		t.Fatalf("expected extendParam to be set")
+	}
+	if spec.ExtendParam.MaxPods == nil || *spec.ExtendParam.MaxPods != maxPods {
+		t.Fatalf("expected maxPods %d, got %#v", maxPods, spec.ExtendParam.MaxPods)
+	}
+	if spec.ExtendParam.KubeReservedCpu == nil || *spec.ExtendParam.KubeReservedCpu != 1500 {
+		t.Fatalf("expected kubeReservedCpu 1500, got %#v", spec.ExtendParam.KubeReservedCpu)
+	}
+	if spec.ExtendParam.KubeReservedMem == nil || *spec.ExtendParam.KubeReservedMem != 1024 {
+		t.Fatalf("expected kubeReservedMem 1024, got %#v", spec.ExtendParam.KubeReservedMem)
+	}
+	if spec.ExtendParam.KubeReservedStorage == nil || *spec.ExtendParam.KubeReservedStorage != 2 {
+		t.Fatalf("expected kubeReservedStorage 2, got %#v", spec.ExtendParam.KubeReservedStorage)
+	}
+	if spec.ExtendParam.KubeReservedPid == nil || *spec.ExtendParam.KubeReservedPid != 1234 {
+		t.Fatalf("expected kubeReservedPid 1234, got %#v", spec.ExtendParam.KubeReservedPid)
+	}
+	if spec.ExtendParam.SystemReservedCpu == nil || *spec.ExtendParam.SystemReservedCpu != 250 {
+		t.Fatalf("expected systemReservedCpu 250, got %#v", spec.ExtendParam.SystemReservedCpu)
+	}
+	if spec.ExtendParam.SystemReservedMem == nil || *spec.ExtendParam.SystemReservedMem != 512 {
+		t.Fatalf("expected systemReservedMem 512, got %#v", spec.ExtendParam.SystemReservedMem)
+	}
+	if spec.ExtendParam.SystemReservedStorage == nil || *spec.ExtendParam.SystemReservedStorage != 1 {
+		t.Fatalf("expected systemReservedStorage 1, got %#v", spec.ExtendParam.SystemReservedStorage)
+	}
+	if spec.ExtendParam.SystemReservedPid == nil || *spec.ExtendParam.SystemReservedPid != 4321 {
+		t.Fatalf("expected systemReservedPid 4321, got %#v", spec.ExtendParam.SystemReservedPid)
+	}
 }
 
 func TestNodeSpecForCandidate_DefaultsManagedK8SDataDisk(t *testing.T) {
@@ -388,7 +437,7 @@ func TestNodeSpecForCandidate_DefaultsManagedK8SDataDisk(t *testing.T) {
 		},
 	}
 
-	spec := provider.nodeSpecForCandidate(
+	spec, err := provider.nodeSpecForCandidate(
 		nodeClass,
 		&karpv1.NodeClaim{},
 		nil,
@@ -399,6 +448,9 @@ func TestNodeSpecForCandidate_DefaultsManagedK8SDataDisk(t *testing.T) {
 		},
 		"HCE OS 2.0",
 	)
+	if err != nil {
+		t.Fatalf("expected node spec creation to succeed, got %v", err)
+	}
 
 	if spec.DataVolumes == nil || len(*spec.DataVolumes) != 1 {
 		t.Fatalf("expected one default k8s data volume, got %#v", spec.DataVolumes)
@@ -416,6 +468,131 @@ func TestNodeSpecForCandidate_DefaultsManagedK8SDataDisk(t *testing.T) {
 	if selector.MatchLabels.VolumeType == nil || *selector.MatchLabels.VolumeType != "SAS" {
 		t.Fatalf("expected default selector volume type SAS, got %#v", selector.MatchLabels.VolumeType)
 	}
+	if spec.ExtendParam != nil {
+		t.Fatalf("expected extendParam to be omitted when kubelet is unset, got %#v", spec.ExtendParam)
+	}
+}
+
+func TestNodeSpecForCandidate_RejectsInvalidKubeletReservation(t *testing.T) {
+	provider := &DefaultProvider{}
+	nodeClass := &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
+			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "HCE OS 2.0"},
+			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
+				Root: v1alpha1.BlockDevice{
+					VolumeSize: 120,
+					VolumeType: "SAS",
+				},
+			},
+			Kubelet: &v1alpha1.KubeletConfiguration{
+				KubeReserved: map[string]string{
+					string(corev1.ResourceMemory): "1536Ki",
+				},
+			},
+			Login: v1alpha1.Login{
+				UserPassword: v1alpha1.UserPassword{
+					Password: "ciphertext",
+				},
+			},
+		},
+	}
+
+	_, err := provider.nodeSpecForCandidate(
+		nodeClass,
+		&karpv1.NodeClaim{},
+		nil,
+		createCandidate{
+			instanceType: &cloudprovider.InstanceType{Name: "c9.large.2"},
+			zone:         "ap-southeast-3a",
+			subnetID:     "subnet-123",
+		},
+		"HCE OS 2.0",
+	)
+	if err == nil {
+		t.Fatalf("expected invalid kubelet reservation to be rejected")
+	}
+}
+
+func TestValidateKubeletForCreateNode(t *testing.T) {
+	t.Run("accepts valid kubelet reservations", func(t *testing.T) {
+		maxPods := int32(64)
+		nodeClass := &v1alpha1.CCENodeClass{
+			Spec: v1alpha1.CCENodeClassSpec{
+				Kubelet: &v1alpha1.KubeletConfiguration{
+					MaxPods: &maxPods,
+					KubeReserved: map[string]string{
+						string(corev1.ResourceCPU):              "1500m",
+						string(corev1.ResourceMemory):           "1Gi",
+						string(corev1.ResourceEphemeralStorage): "2Gi",
+						"pid":                                   "1234",
+					},
+					SystemReserved: map[string]string{
+						string(corev1.ResourceCPU):              "250m",
+						string(corev1.ResourceMemory):           "512Mi",
+						string(corev1.ResourceEphemeralStorage): "1Gi",
+						"pid":                                   "4321",
+					},
+				},
+			},
+		}
+		if err := ValidateKubeletForCreateNode(nodeClass); err != nil {
+			t.Fatalf("expected kubelet validation to succeed, got %v", err)
+		}
+	})
+
+	t.Run("rejects maxPods smaller than 16", func(t *testing.T) {
+		value := int32(15)
+		nodeClass := &v1alpha1.CCENodeClass{
+			Spec: v1alpha1.CCENodeClassSpec{
+				Kubelet: &v1alpha1.KubeletConfiguration{MaxPods: &value},
+			},
+		}
+		if err := ValidateKubeletForCreateNode(nodeClass); err == nil {
+			t.Fatalf("expected undersized maxPods to be rejected")
+		}
+	})
+
+	t.Run("rejects maxPods larger than 256", func(t *testing.T) {
+		value := int32(257)
+		nodeClass := &v1alpha1.CCENodeClass{
+			Spec: v1alpha1.CCENodeClassSpec{
+				Kubelet: &v1alpha1.KubeletConfiguration{MaxPods: &value},
+			},
+		}
+		if err := ValidateKubeletForCreateNode(nodeClass); err == nil {
+			t.Fatalf("expected oversized maxPods to be rejected")
+		}
+	})
+
+	t.Run("rejects kubeReserved memory that is not an exact MiB", func(t *testing.T) {
+		nodeClass := &v1alpha1.CCENodeClass{
+			Spec: v1alpha1.CCENodeClassSpec{
+				Kubelet: &v1alpha1.KubeletConfiguration{
+					KubeReserved: map[string]string{
+						string(corev1.ResourceMemory): "1536Ki",
+					},
+				},
+			},
+		}
+		if err := ValidateKubeletForCreateNode(nodeClass); err == nil {
+			t.Fatalf("expected non-MiB memory quantity to be rejected")
+		}
+	})
+
+	t.Run("rejects systemReserved pid that is not an integer", func(t *testing.T) {
+		nodeClass := &v1alpha1.CCENodeClass{
+			Spec: v1alpha1.CCENodeClassSpec{
+				Kubelet: &v1alpha1.KubeletConfiguration{
+					SystemReserved: map[string]string{
+						"pid": "1.5",
+					},
+				},
+			},
+		}
+		if err := ValidateKubeletForCreateNode(nodeClass); err == nil {
+			t.Fatalf("expected non-integer pid quantity to be rejected")
+		}
+	})
 }
 
 func TestToCCETaints_InjectsKarpenterUnregisteredTaint(t *testing.T) {
