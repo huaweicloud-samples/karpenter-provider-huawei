@@ -244,53 +244,6 @@ subjects:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ .Values.namePrefix }}metrics-auth-role
-  labels:
-    {{- include "karpenter-provider-huawei.labels" . | nindent 4 }}
-rules:
-- apiGroups:
-  - authentication.k8s.io
-  resources:
-  - tokenreviews
-  verbs:
-  - create
-- apiGroups:
-  - authorization.k8s.io
-  resources:
-  - subjectaccessreviews
-  verbs:
-  - create
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: {{ .Values.namePrefix }}metrics-auth-rolebinding
-  labels:
-    {{- include "karpenter-provider-huawei.labels" . | nindent 4 }}
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: {{ .Values.namePrefix }}metrics-auth-role
-subjects:
-- kind: ServiceAccount
-  name: {{ include "karpenter-provider-huawei.serviceAccountName" . }}
-  namespace: {{ .Release.Namespace }}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: {{ .Values.namePrefix }}metrics-reader
-  labels:
-    {{- include "karpenter-provider-huawei.labels" . | nindent 4 }}
-rules:
-- nonResourceURLs:
-  - "/metrics"
-  verbs:
-  - get
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
   name: {{ .Values.namePrefix }}ccenodeclass-admin-role
   labels:
     {{- include "karpenter-provider-huawei.labels" . | nindent 4 }}

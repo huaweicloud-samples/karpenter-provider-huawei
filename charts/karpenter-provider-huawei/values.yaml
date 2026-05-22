@@ -12,16 +12,6 @@ image:
   # -- Image pull policy
   pullPolicy: IfNotPresent
 
-# kube-rbac-proxy sidecar configuration
-rbacProxy:
-  image:
-    # -- kube-rbac-proxy image repository
-    repository: quay.io/brancz/kube-rbac-proxy
-    # -- kube-rbac-proxy image tag
-    tag: "v0.16.0"
-    # -- Image pull policy
-    pullPolicy: IfNotPresent
-
 # -- Image pull secrets for controller pods
 imagePullSecrets: []
 # - name: registry-credentials
@@ -35,12 +25,32 @@ serviceAccount:
   # -- ServiceAccount name
   name: controller-manager
 
+service:
+  # -- Additional annotations for the metrics Service
+  annotations: {}
+
+serviceMonitor:
+  # -- Specifies whether a ServiceMonitor should be created
+  enabled: false
+  # -- Additional labels for the ServiceMonitor
+  additionalLabels: {}
+  # -- Relabelings for the `http-metrics` endpoint on the ServiceMonitor
+  relabelings: []
+  # -- Metric relabelings for the `http-metrics` endpoint on the ServiceMonitor
+  metricRelabelings: []
+  # -- Additional configuration on the `http-metrics` endpoint
+  endpointConfig: {}
+  # -- Per-scrape limit on the number of scraped samples accepted by Prometheus
+  sampleLimit: null
+
 # Controller arguments
 controller:
-  # -- Metrics port
-  metricsPort: 8080
-  # -- Health probe port
-  healthProbePort: 8081
+  metrics:
+    # -- Metrics port
+    port: 8080
+  healthProbe:
+    # -- Health probe port
+    port: 8081
 
 # Huawei Cloud credentials
 # The generated Secret uses HUAWEICLOUD_SDK_AK, HUAWEICLOUD_SDK_SK,

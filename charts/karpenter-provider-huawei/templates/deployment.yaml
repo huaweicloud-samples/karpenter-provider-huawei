@@ -32,35 +32,16 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
-      - name: kube-rbac-proxy
-        image: "{{ .Values.rbacProxy.image.repository }}:{{ .Values.rbacProxy.image.tag }}"
-        imagePullPolicy: {{ .Values.rbacProxy.image.pullPolicy }}
-        args:
-        - --secure-listen-address=0.0.0.0:8443
-        - --upstream=http://127.0.0.1:{{ .Values.controller.metricsPort }}/
-        - --logtostderr=true
-        - --v=0
-        ports:
-        - containerPort: 8443
-          name: https
-        securityContext:
-          runAsNonRoot: true
-          runAsUser: 65532
-          readOnlyRootFilesystem: true
-          allowPrivilegeEscalation: false
-          capabilities:
-            drop:
-            - "ALL"
       - name: manager
         image: {{ include "karpenter-provider-huawei.controllerImage" . | quote }}
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         command:
         - /manager
         args:
-        - --metrics-port={{ .Values.controller.metricsPort }}
-        - --health-probe-port={{ .Values.controller.healthProbePort }}
+        - --metrics-port={{ .Values.controller.metrics.port }}
+        - --health-probe-port={{ .Values.controller.healthProbe.port }}
         ports:
-        - containerPort: {{ .Values.controller.metricsPort }}
+        - containerPort: {{ .Values.controller.metrics.port }}
           name: http-metrics
         env:
         - name: LEADER_ELECTION_NAMESPACE
@@ -77,21 +58,21 @@ spec:
         startupProbe:
           httpGet:
             path: /healthz
-            port: {{ .Values.controller.healthProbePort }}
+            port: {{ .Values.controller.healthProbe.port }}
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 30
         livenessProbe:
           httpGet:
             path: /healthz
-            port: {{ .Values.controller.healthProbePort }}
+            port: {{ .Values.controller.healthProbe.port }}
           periodSeconds: 20
           timeoutSeconds: 5
           failureThreshold: 3
         readinessProbe:
           httpGet:
             path: /readyz
-            port: {{ .Values.controller.healthProbePort }}
+            port: {{ .Values.controller.healthProbe.port }}
           periodSeconds: 10
           timeoutSeconds: 5
           failureThreshold: 6
