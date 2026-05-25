@@ -5,14 +5,15 @@ metadata:
     control-plane: controller-manager
     app.kubernetes.io/name: karpenter-provider-huawei
     app.kubernetes.io/managed-by: kustomize
-  name: controller-manager-metrics-service
+  name: controller-manager
   namespace: system
 spec:
+  type: ClusterIP
   ports:
-  - name: https
-    port: 8443
+  - name: http-metrics
+    port: 8080
     protocol: TCP
-    targetPort: 8443
+    targetPort: http-metrics
   selector:
     control-plane: controller-manager
     app.kubernetes.io/name: karpenter-provider-huawei
