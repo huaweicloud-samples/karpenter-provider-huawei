@@ -201,7 +201,7 @@ func memory(info ecsMdl.Flavor) *resource.Quantity {
 }
 
 func ephemeralStorage(blockDeviceMappings v1alpha1.BlockDeviceMappings) *resource.Quantity {
-	sizeGiB := v1alpha1.MinDataVolumeSizeGiB
+	sizeGiB := v1alpha1.DefaultKubernetesVolumeSizeGiB
 	if blockDeviceMappings.K8S != nil && blockDeviceMappings.K8S.VolumeSize > 0 {
 		sizeGiB = blockDeviceMappings.K8S.VolumeSize
 	}

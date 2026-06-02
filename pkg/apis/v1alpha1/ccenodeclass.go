@@ -98,8 +98,10 @@ type normalizedBlockDeviceMappings struct {
 }
 
 const (
-	MinRootVolumeSizeGiB = int32(40)
-	MinDataVolumeSizeGiB = int32(100)
+	MinRootVolumeSizeGiB           = int32(40)
+	MinKubernetesDataVolumeSizeGiB = int32(20)
+	MinUserDataVolumeSizeGiB       = int32(10)
+	DefaultKubernetesVolumeSizeGiB = int32(100)
 )
 
 // IMSSelector defines the node operating system family used by CCE CreateNode.
@@ -111,8 +113,8 @@ type IMSSelector struct {
 
 // BlockDeviceMappings defines disk configuration for root, k8s, and user data volumes.
 // +kubebuilder:validation:XValidation:message="blockDeviceMappings.root.volumeSize must be at least 40Gi",rule="self.root.volumeSize >= 40"
-// +kubebuilder:validation:XValidation:message="blockDeviceMappings.k8s.volumeSize must be at least 100Gi when specified",rule="!has(self.k8s) || self.k8s.volumeSize >= 100"
-// +kubebuilder:validation:XValidation:message="blockDeviceMappings.users volumeSize must be at least 100Gi",rule="!has(self.users) || self.users.all(x, x.volumeSize >= 100)"
+// +kubebuilder:validation:XValidation:message="blockDeviceMappings.k8s.volumeSize must be at least 20Gi when specified",rule="!has(self.k8s) || self.k8s.volumeSize >= 20"
+// +kubebuilder:validation:XValidation:message="blockDeviceMappings.users volumeSize must be at least 10Gi",rule="!has(self.users) || self.users.all(x, x.volumeSize >= 10)"
 type BlockDeviceMappings struct {
 	// K8S is the data volume used by the container runtime and kubelet.
 	// +optional
@@ -192,12 +194,12 @@ func (s *CCENodeClassSpec) ValidateForCreateNode() error {
 	if s.BlockDeviceMappings.Root.VolumeSize < MinRootVolumeSizeGiB {
 		return fmt.Errorf("nodeClass.spec.blockDeviceMappings.root.volumeSize must be at least %dGi", MinRootVolumeSizeGiB)
 	}
-	if s.BlockDeviceMappings.K8S != nil && s.BlockDeviceMappings.K8S.VolumeSize < MinDataVolumeSizeGiB {
-		return fmt.Errorf("nodeClass.spec.blockDeviceMappings.k8s.volumeSize must be at least %dGi", MinDataVolumeSizeGiB)
+	if s.BlockDeviceMappings.K8S != nil && s.BlockDeviceMappings.K8S.VolumeSize < MinKubernetesDataVolumeSizeGiB {
+		return fmt.Errorf("nodeClass.spec.blockDeviceMappings.k8s.volumeSize must be at least %dGi", MinKubernetesDataVolumeSizeGiB)
 	}
 	for i, user := range s.BlockDeviceMappings.Users {
-		if user.VolumeSize < MinDataVolumeSizeGiB {
-			return fmt.Errorf("nodeClass.spec.blockDeviceMappings.users[%d].volumeSize must be at least %dGi", i, MinDataVolumeSizeGiB)
+		if user.VolumeSize < MinUserDataVolumeSizeGiB {
+			return fmt.Errorf("nodeClass.spec.blockDeviceMappings.users[%d].volumeSize must be at least %dGi", i, MinUserDataVolumeSizeGiB)
 		}
 	}
 	return nil

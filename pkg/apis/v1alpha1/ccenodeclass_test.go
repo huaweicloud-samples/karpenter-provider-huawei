@@ -110,54 +110,57 @@ func TestCCENodeClassHash(t *testing.T) {
 }
 
 func TestCCENodeClassSpecValidateForCreateNode(t *testing.T) {
-	valid := CCENodeClassSpec{
-		IMSSelector: IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
-		BlockDeviceMappings: BlockDeviceMappings{
-			Root: BlockDevice{
-				VolumeSize: 40,
-				VolumeType: "SSD",
+	validSpec := func() CCENodeClassSpec {
+		return CCENodeClassSpec{
+			IMSSelector: IMSSelector{IMSFamily: "Huawei Cloud EulerOS 2.0"},
+			BlockDeviceMappings: BlockDeviceMappings{
+				Root: BlockDevice{
+					VolumeSize: MinRootVolumeSizeGiB,
+					VolumeType: "SSD",
+				},
+				K8S: &BlockDevice{
+					VolumeSize: MinKubernetesDataVolumeSizeGiB,
+					VolumeType: "SAS",
+				},
+				Users: []BlockDevice{{
+					VolumeSize: MinUserDataVolumeSizeGiB,
+					VolumeType: "SATA",
+				}},
 			},
-			K8S: &BlockDevice{
-				VolumeSize: 100,
-				VolumeType: "SAS",
+			Login: Login{
+				UserPassword: UserPassword{Password: "ciphertext"},
 			},
-			Users: []BlockDevice{{
-				VolumeSize: 100,
-				VolumeType: "SATA",
-			}},
-		},
-		Login: Login{
-			UserPassword: UserPassword{Password: "ciphertext"},
-		},
+		}
 	}
 
 	t.Run("accepts valid data volumes", func(t *testing.T) {
-		if err := valid.ValidateForCreateNode(); err != nil {
+		spec := validSpec()
+		if err := spec.ValidateForCreateNode(); err != nil {
 			t.Fatalf("expected validation to succeed, got %v", err)
 		}
 	})
 
 	t.Run("rejects root volume smaller than 40Gi", func(t *testing.T) {
-		spec := valid
-		spec.BlockDeviceMappings.Root.VolumeSize = 39
+		spec := validSpec()
+		spec.BlockDeviceMappings.Root.VolumeSize = MinRootVolumeSizeGiB - 1
 
 		if err := spec.ValidateForCreateNode(); err == nil {
 			t.Fatalf("expected validation to fail for undersized root volume")
 		}
 	})
 
-	t.Run("rejects k8s volume smaller than 100Gi", func(t *testing.T) {
-		spec := valid
-		spec.BlockDeviceMappings.K8S.VolumeSize = 99
+	t.Run("rejects k8s volume smaller than 20Gi", func(t *testing.T) {
+		spec := validSpec()
+		spec.BlockDeviceMappings.K8S.VolumeSize = MinKubernetesDataVolumeSizeGiB - 1
 
 		if err := spec.ValidateForCreateNode(); err == nil {
 			t.Fatalf("expected validation to fail for undersized k8s volume")
 		}
 	})
 
-	t.Run("rejects user volume smaller than 100Gi", func(t *testing.T) {
-		spec := valid
-		spec.BlockDeviceMappings.Users[0].VolumeSize = 99
+	t.Run("rejects user volume smaller than 10Gi", func(t *testing.T) {
+		spec := validSpec()
+		spec.BlockDeviceMappings.Users[0].VolumeSize = MinUserDataVolumeSizeGiB - 1
 
 		if err := spec.ValidateForCreateNode(); err == nil {
 			t.Fatalf("expected validation to fail for undersized user volume")
