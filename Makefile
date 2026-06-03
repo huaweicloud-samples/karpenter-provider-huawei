@@ -6,7 +6,8 @@ GORELEASER_VERSION ?= v1.26.2
 IMAGE_REPO ?= huaweiclouddeveloper
 STAGING_REGISTRY ?= ghcr.io/$(IMAGE_REPO)
 REGISTRY ?= $(STAGING_REGISTRY)
-CORE_IMAGE_NAME ?= karpenter-provider-huawei
+IMAGE_NAME ?= cce/karpenter/controller
+CORE_IMAGE_NAME ?= $(IMAGE_NAME)
 CORE_CONTROLLER_IMG ?= $(REGISTRY)/$(CORE_IMAGE_NAME)
 IMG ?= $(CORE_CONTROLLER_IMG):$(RELEASE_TAG)
 
@@ -131,6 +132,10 @@ run: manifests generate fmt vet ## Run a controller from your host.
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
+
+.PHONY: print-image
+print-image: ## Print the effective controller image reference.
+	@echo ${IMG}
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.

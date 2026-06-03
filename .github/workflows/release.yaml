@@ -20,8 +20,8 @@ jobs:
         fetch-depth: 0
     - name: Set release info
       run: |
-        echo "RELEASE_TAG=${GITHUB_REF_NAME}" >> $GITHUB_ENV
-        echo "IMAGE_REPO=$(echo ${GITHUB_REPOSITORY%%/*} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+        echo "RELEASE_TAG=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+        echo "IMAGE_REPO=$(echo "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
     - name: Setup Go
       uses: actions/setup-go@v5
       with:
@@ -37,9 +37,16 @@ jobs:
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
     - name: Build and push
+      env:
+        RELEASE_IMAGE_NAME: ${{ vars.RELEASE_IMAGE_NAME }}
       run: |
+        make_args=(IMAGE_REPO="$IMAGE_REPO" RELEASE_TAG="$RELEASE_TAG")
+        if [ -n "$RELEASE_IMAGE_NAME" ]; then
+          make_args+=(IMAGE_NAME="$(echo "$RELEASE_IMAGE_NAME" | tr '[:upper:]' '[:lower:]')")
+        fi
         echo "Release tag is: $RELEASE_TAG"
-        make docker-buildx
+        echo "Release image is: $(make print-image "${make_args[@]}")"
+        make docker-buildx "${make_args[@]}"
     - name: Run release
       run: |
         echo "Release tag is: $RELEASE_TAG"
