@@ -220,7 +220,7 @@ func TestCreate_RejectsNodeClassWithUndersizedDataVolumeBeforeCallingCloudAPI(t 
 			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
 				Root: v1alpha1.BlockDevice{VolumeSize: 40, VolumeType: "SSD"},
 				Users: []v1alpha1.BlockDevice{{
-					VolumeSize: 10,
+					VolumeSize: 9,
 					VolumeType: "SAS",
 				}},
 			},
@@ -265,7 +265,7 @@ func TestCreate_RejectsNodeClassWithUndersizedDataVolumeBeforeCallingCloudAPI(t 
 	if instanceProvider.createCalls != 0 {
 		t.Fatalf("expected instance provider not to be called, got %d call(s)", instanceProvider.createCalls)
 	}
-	if got, want := err.Error(), "nodeClass.spec.blockDeviceMappings.users[0].volumeSize must be at least 100Gi"; !strings.Contains(got, want) {
+	if got, want := err.Error(), "nodeClass.spec.blockDeviceMappings.users[0].volumeSize must be at least 10Gi"; !strings.Contains(got, want) {
 		t.Fatalf("expected error to contain %q, got %q", want, got)
 	}
 }

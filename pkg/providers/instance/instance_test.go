@@ -455,7 +455,7 @@ func TestNodeSpecForCandidate_DefaultsManagedK8SDataDisk(t *testing.T) {
 	if spec.DataVolumes == nil || len(*spec.DataVolumes) != 1 {
 		t.Fatalf("expected one default k8s data volume, got %#v", spec.DataVolumes)
 	}
-	if got := (*spec.DataVolumes)[0]; got.Size != v1alpha1.MinDataVolumeSizeGiB || got.Volumetype != "SAS" {
+	if got := (*spec.DataVolumes)[0]; got.Size != v1alpha1.DefaultKubernetesVolumeSizeGiB || got.Volumetype != "SAS" {
 		t.Fatalf("expected default managed data volume 100/SAS, got %#v", got)
 	}
 	if spec.Storage == nil || len(spec.Storage.StorageSelectors) != 1 {

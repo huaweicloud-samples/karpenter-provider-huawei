@@ -15,11 +15,7 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 
 ## Known Limitations
 
-This project is at an early **v1alpha1** stage. Please be aware of the following limitations:
-
 - **On-demand only**: Only `on-demand` capacity type is supported. Spot instances are not yet available.
-- **Default k8s data disk**: CCE requires a data disk for worker nodes. If `spec.blockDeviceMappings.k8s` is omitted, a **100 GiB data disk** using the same type as `spec.blockDeviceMappings.root` is added automatically.
-- **Data disk minimum size**: In the current CCE CreateNode validation, explicit `k8s` and `users` data volumes must be at least **100 GiB**.
 
 ## Prerequisites
 

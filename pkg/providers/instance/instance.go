@@ -494,7 +494,7 @@ func resolveDataVolumes(nodeClass *v1alpha1.CCENodeClass, rootVolumeType string)
 		volumes = append(volumes, *toCCEVolume(nodeClass.Spec.BlockDeviceMappings.K8S))
 	} else {
 		volumes = append(volumes, cceMdl.Volume{
-			Size:       v1alpha1.MinDataVolumeSizeGiB,
+			Size:       v1alpha1.DefaultKubernetesVolumeSizeGiB,
 			Volumetype: rootVolumeType,
 		})
 	}
@@ -509,7 +509,7 @@ func resolveDataVolumes(nodeClass *v1alpha1.CCENodeClass, rootVolumeType string)
 
 func resolveStorage(nodeClass *v1alpha1.CCENodeClass, rootVolumeType string) *cceMdl.Storage {
 	managedVolume := cceMdl.Volume{
-		Size:       v1alpha1.MinDataVolumeSizeGiB,
+		Size:       v1alpha1.DefaultKubernetesVolumeSizeGiB,
 		Volumetype: rootVolumeType,
 	}
 	if nodeClass.Spec.BlockDeviceMappings.K8S != nil {
