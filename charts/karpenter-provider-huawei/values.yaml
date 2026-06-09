@@ -56,6 +56,8 @@ controller:
 # The generated Secret uses HUAWEICLOUD_SDK_AK, HUAWEICLOUD_SDK_SK,
 # and HUAWEICLOUD_SDK_REGION_ID from this block, plus
 # HUAWEICLOUD_SDK_CCE_CLUSTER_ID from clusterInfo.clusterID.
+# If credentials.bssEndpoint is set, the generated Secret also includes
+# HUAWEICLOUD_BSS_ENDPOINT for cross-website BSS pricing queries.
 # If credentials.create=false, the existing Secret should provide the same keys.
 credentials:
   # -- Create a Secret for credentials
@@ -70,6 +72,8 @@ credentials:
   secretKey: ""
   # -- Huawei Cloud region ID
   region: ""
+  # -- Optional BSS endpoint override for non-China websites
+  bssEndpoint: ""
 
 clusterInfo:
   # -- Huawei Cloud CCE cluster ID

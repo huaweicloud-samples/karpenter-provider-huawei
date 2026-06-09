@@ -65,6 +65,7 @@ const (
 	// if it is not updated by a node creation event or refreshed during controller reconciliation
 	DiscoveredCapacityCacheTTL = 60 * 24 * time.Hour
 	BillingEndpoint            = "https://bss.myhuaweicloud.com"
+	BillingEndpointEnv         = "HUAWEICLOUD_BSS_ENDPOINT"
 	IgnoreSSLEnv               = "HUAWEICLOUD_SDK_IGNORE_SSL_VERIFICATION"
 )
 
@@ -125,7 +126,8 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	lo.Must0(versionProvider.UpdateVersionWithValidation(ctx))
 
 	ecsApi := sdk.NewECSService(ecsReg, credentials, httpConfig)
-	bssApi := sdk.NewBSSService(billingRegion(reg), globalCredentials, httpConfig)
+	billingReg := billingRegion(reg)
+	bssApi := sdk.NewBSSService(billingReg, globalCredentials, httpConfig)
 	cceApi := sdk.NewCCEService(cceReg, credentials, httpConfig)
 	unavailableOfferingCache := utils.NewOfferingAvailabilityCache(UnavailableOfferingTTL, DefaultCleanupInterval)
 	instanceProvider := instance.NewDefaultProvider(clusterID, cceApi, ecsApi, subnetProvider, unavailableOfferingCache)
@@ -143,7 +145,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		logger.Error(err, "failed to preload instance types and offerings")
 	}
 	if err := pricingProvider.UpdateOnDemandPricing(ctx, instanceTypeProvider.InstanceTypeInfos()); err != nil {
-		logger.Error(err, "failed to preload on-demand pricing")
+		logger.Error(err, "failed to preload on-demand pricing", "region", reg, "bss-endpoint", billingRegionEndpoint(billingReg))
 	}
 	return ctx, &Operator{
 		Operator:             operator,
@@ -171,9 +173,20 @@ func sdkHTTPConfig() (*config.HttpConfig, error) {
 }
 
 func billingRegion(regionID string) *coreRegion.Region {
+	if endpoint := strings.TrimSpace(os.Getenv(BillingEndpointEnv)); endpoint != "" {
+		return coreRegion.NewRegion(regionID, endpoint)
+	}
+
 	reg, err := bssRegion.SafeValueOf(regionID)
 	if err == nil && reg != nil {
 		return reg
 	}
 	return coreRegion.NewRegion(regionID, BillingEndpoint)
+}
+
+func billingRegionEndpoint(region *coreRegion.Region) string {
+	if region == nil || len(region.Endpoints) == 0 {
+		return ""
+	}
+	return region.Endpoints[0]
 }
