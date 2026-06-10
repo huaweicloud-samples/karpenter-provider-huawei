@@ -116,7 +116,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 
 	httpConfig, err := sdkHTTPConfig()
 	if err != nil {
-		lo.Must0(err)
+		lo.Must0(fmt.Errorf("unable to build SDK HTTP config: %w", err))
 	}
 
 	vpcApi := sdk.NewVPCService(vpcReg, credentials, httpConfig)
@@ -126,8 +126,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 	lo.Must0(versionProvider.UpdateVersionWithValidation(ctx))
 
 	ecsApi := sdk.NewECSService(ecsReg, credentials, httpConfig)
-	billingReg := billingRegion(reg)
-	bssApi := sdk.NewBSSService(billingReg, globalCredentials, httpConfig)
+	bssApi := sdk.NewBSSService(billingRegion(reg), globalCredentials, httpConfig)
 	cceApi := sdk.NewCCEService(cceReg, credentials, httpConfig)
 	unavailableOfferingCache := utils.NewOfferingAvailabilityCache(UnavailableOfferingTTL, DefaultCleanupInterval)
 	instanceProvider := instance.NewDefaultProvider(clusterID, cceApi, ecsApi, subnetProvider, unavailableOfferingCache)
@@ -145,7 +144,7 @@ func NewOperator(ctx context.Context, operator *operator.Operator) (context.Cont
 		logger.Error(err, "failed to preload instance types and offerings")
 	}
 	if err := pricingProvider.UpdateOnDemandPricing(ctx, instanceTypeProvider.InstanceTypeInfos()); err != nil {
-		logger.Error(err, "failed to preload on-demand pricing", "region", reg, "bss-endpoint", billingRegionEndpoint(billingReg))
+		logger.Error(err, "failed to preload on-demand pricing", "region", reg, "bss-endpoint", billingRegionEndpoint(billingRegion(reg)))
 	}
 	return ctx, &Operator{
 		Operator:             operator,

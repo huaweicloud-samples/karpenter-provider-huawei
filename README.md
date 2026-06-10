@@ -45,15 +45,6 @@ helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
 The chart creates a `huawei-credentials` Secret by default and loads it into the controller.
 To use an existing Secret instead, set `credentials.create=false` and `credentials.existingSecret=<secret-name>`.
 
-The BSS pricing API uses the China website endpoint `https://bss.myhuaweicloud.com` by default.
-For non-China Huawei Cloud accounts, add `--set-string credentials.bssEndpoint=<endpoint>` with the matching BSS website endpoint:
-
-- International website: `https://bss-intl.myhuaweicloud.com`
-- Europe website: `https://bss.myhuaweicloud.eu`
-
-The default controller image is `swr.ap-southeast-3.myhuaweicloud.com/huaweiclouddeveloper/cce/karpenter/controller:latest`.
-To use a custom controller image, add `--set image.repository=<your-registry>/controller --set image.tag=<your-tag>`.
-
 ## Getting Started
 
 ### Step 1: Create a CCENodeClass
