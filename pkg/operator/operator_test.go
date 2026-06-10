@@ -46,6 +46,35 @@ func TestBillingRegionUsesSDKEnvOverride(t *testing.T) {
 	}
 }
 
+func TestBillingRegionUsesConfiguredBSSEndpoint(t *testing.T) {
+	t.Setenv(BillingEndpointEnv, "https://bss-intl.myhuaweicloud.com")
+	t.Setenv("HUAWEICLOUD_SDK_REGION_BSS_CN_NORTH_4", "https://bss.custom.example.com")
+
+	region := billingRegion("cn-north-4")
+	if region == nil {
+		t.Fatalf("expected billing region to be constructed")
+	}
+	if region.Id != "cn-north-4" {
+		t.Fatalf("expected region id %q, got %q", "cn-north-4", region.Id)
+	}
+	if len(region.Endpoints) != 1 || region.Endpoints[0] != "https://bss-intl.myhuaweicloud.com" {
+		t.Fatalf("expected endpoints [%q], got %v", "https://bss-intl.myhuaweicloud.com", region.Endpoints)
+	}
+}
+
+func TestBillingRegionIgnoresBlankConfiguredBSSEndpoint(t *testing.T) {
+	t.Setenv(BillingEndpointEnv, " \t ")
+	t.Setenv("HUAWEICLOUD_SDK_REGION_BSS_CN_NORTH_4", "https://bss.custom.example.com")
+
+	region := billingRegion("cn-north-4")
+	if region == nil {
+		t.Fatalf("expected billing region to be constructed")
+	}
+	if len(region.Endpoints) != 1 || region.Endpoints[0] != "https://bss.custom.example.com" {
+		t.Fatalf("expected endpoints [%q], got %v", "https://bss.custom.example.com", region.Endpoints)
+	}
+}
+
 func TestSDKHTTPConfigUsesConfiguredIgnoreSSLVerification(t *testing.T) {
 	t.Setenv(IgnoreSSLEnv, "true")
 
