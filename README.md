@@ -20,7 +20,7 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 ## Prerequisites
 
 - A **Huawei Cloud CCE cluster** running Kubernetes **1.26 - 1.34**
-- Huawei Cloud credentials (AK/SK) with permissions for:
+- Huawei Cloud credentials (AK/SK), or a CCE Pod Identity-associated IAM agency, with permissions for:
   - **ECS** - Elastic Cloud Server (flavor listing, server tagging)
   - **CCE** - Cloud Container Engine (node create/delete/list)
   - **VPC** - Virtual Private Cloud (subnet discovery)
@@ -31,6 +31,8 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 ## Installation
 
 ### 1. Install via Helm
+
+#### Using AK/SK credentials
 
 ```bash
 helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
@@ -44,6 +46,38 @@ helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
 
 The chart creates a `huawei-credentials` Secret by default and loads it into the controller.
 To use an existing Secret instead, set `credentials.create=false` and `credentials.existingSecret=<secret-name>`.
+
+#### Using CCE Pod Identity
+
+Create an IAM agency with the required permissions, then install the chart with zero replicas so Helm creates the ServiceAccount used by Pod Identity:
+
+```bash
+helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
+  --namespace karpenter-provider-huawei-system \
+  --create-namespace \
+  --set replicaCount=0 \
+  --set podIdentity.enabled=true \
+  --set-string credentials.region=<region-id> \
+  --set-string clusterInfo.clusterID=<cce-cluster-id>
+```
+
+In the CCE console, [create a pod identity association](https://support.huaweicloud.com/usermanual-cce/cce_10_1110.html#section2):
+- Namespace: `karpenter-provider-huawei-system`
+- ServiceAccount: `karpenter-provider-huawei-controller-manager`
+- IAM agency: `<agency-name>`
+
+Wait for the association to become ready, then start the controller:
+
+```bash
+helm upgrade karpenter-provider-huawei charts/karpenter-provider-huawei \
+  --namespace karpenter-provider-huawei-system \
+  --set replicaCount=1 \
+  --set podIdentity.enabled=true \
+  --set-string credentials.region=<region-id> \
+  --set-string clusterInfo.clusterID=<cce-cluster-id>
+```
+
+Do not set `credentials.accessKey` or `credentials.secretKey` when `podIdentity.enabled=true`.
 
 ## Getting Started
 
