@@ -1,3 +1,6 @@
+{{- if and .Values.podIdentity.enabled (or .Values.credentials.accessKey .Values.credentials.secretKey) }}
+{{- fail "credentials.accessKey and credentials.secretKey must be empty when podIdentity.enabled is true" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,6 +25,9 @@ spec:
         {{- end }}
       labels:
         {{- include "karpenter-provider-huawei.selectorLabels" . | nindent 8 }}
+        {{- if .Values.podIdentity.enabled }}
+        pod-identity.cce.io/injection: "on"
+        {{- end }}
     spec:
       {{- with .Values.podSecurityContext }}
       securityContext:

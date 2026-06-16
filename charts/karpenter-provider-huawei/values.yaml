@@ -25,6 +25,14 @@ serviceAccount:
   # -- ServiceAccount name
   name: controller-manager
 
+# CCE Pod Identity integration.
+# When enabled, the controller Pod is labeled so CCE can inject
+# HC_CONTAINER_AUTHORIZATION_TOKEN_FILE and HC_CONTAINER_CREDENTIALS_FULL_URI.
+# The ServiceAccount must still be associated with an IAM agency in CCE.
+podIdentity:
+  # -- Enable CCE Pod Identity injection for the controller Pod
+  enabled: false
+
 service:
   # -- Additional annotations for the metrics Service
   annotations: {}
@@ -56,6 +64,7 @@ controller:
 # The generated Secret uses HUAWEICLOUD_SDK_AK, HUAWEICLOUD_SDK_SK,
 # and HUAWEICLOUD_SDK_REGION_ID from this block, plus
 # HUAWEICLOUD_SDK_CCE_CLUSTER_ID from clusterInfo.clusterID.
+# Leave accessKey and secretKey empty when podIdentity.enabled is true.
 # If credentials.bssEndpoint is set, the generated Secret also includes
 # HUAWEICLOUD_BSS_ENDPOINT for cross-website BSS pricing queries.
 # If credentials.create=false, the existing Secret should provide the same keys.
