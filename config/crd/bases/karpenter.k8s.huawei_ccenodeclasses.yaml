@@ -187,6 +187,11 @@ spec:
               login:
                 description: Login defines the node login configuration.
                 properties:
+                  sshKey:
+                    description: SSHKey is the name of an existing Huawei Cloud key
+                      pair for SSH login.
+                    minLength: 1
+                    type: string
                   userPassword:
                     description: UserPassword defines username/password login.
                     properties:
@@ -202,9 +207,12 @@ spec:
                     required:
                     - password
                     type: object
-                required:
-                - userPassword
                 type: object
+                x-kubernetes-validations:
+                - message: exactly one of login.userPassword or login.sshKey must
+                    be set
+                  rule: (has(self.userPassword) && !has(self.sshKey)) || (!has(self.userPassword)
+                    && has(self.sshKey))
               runtimeConfiguration:
                 description: RuntimeConfiguration configures the container runtime
                   used on the node.

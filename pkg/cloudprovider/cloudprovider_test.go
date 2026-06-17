@@ -150,7 +150,7 @@ func TestCreate_AnnotatesReturnedNodeClaimWithCCENodeClassHash(t *testing.T) {
 				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
 			},
 			Login: v1alpha1.Login{
-				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
+				UserPassword: &v1alpha1.UserPassword{Password: "ciphertext"},
 			},
 		},
 		Status: v1alpha1.CCENodeClassStatus{
@@ -225,7 +225,7 @@ func TestCreate_RejectsNodeClassWithUndersizedDataVolumeBeforeCallingCloudAPI(t 
 				}},
 			},
 			Login: v1alpha1.Login{
-				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
+				UserPassword: &v1alpha1.UserPassword{Password: "ciphertext"},
 			},
 		},
 		Status: v1alpha1.CCENodeClassStatus{

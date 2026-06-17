@@ -113,6 +113,26 @@ spec:
       password: "<salted-and-encrypted-password>"
 ```
 
+To use an existing Huawei Cloud key pair instead of password login, set `login.sshKey`:
+
+```yaml
+apiVersion: karpenter.k8s.huawei/v1alpha1
+kind: CCENodeClass
+metadata:
+  name: default
+spec:
+  subnetSelectorTerms:
+    - id: "<subnet-uuid>"
+  imsSelector:
+    imsFamily: "Huawei Cloud EulerOS 2.0"
+  blockDeviceMappings:
+    root:
+      volumeSize: 120
+      volumeType: SAS
+  login:
+    sshKey: "<existing-keypair-name>"
+```
+
 After creation, wait for the `SubnetsReady` condition to become `True` before the NodeClass can be used for provisioning:
 
 ```bash

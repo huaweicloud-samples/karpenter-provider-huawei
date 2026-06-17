@@ -279,7 +279,7 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 				},
 			},
 			Login: v1alpha1.Login{
-				UserPassword: v1alpha1.UserPassword{
+				UserPassword: &v1alpha1.UserPassword{
 					Password: "ciphertext",
 				},
 			},
@@ -380,6 +380,9 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 	if spec.Login.UserPassword.Password != "ciphertext" {
 		t.Fatalf("expected login password to be propagated, got %#v", spec.Login.UserPassword.Password)
 	}
+	if spec.Login.SshKey != nil {
+		t.Fatalf("expected ssh key to be omitted for password login, got %#v", spec.Login.SshKey)
+	}
 	if spec.EcsGroupId == nil || *spec.EcsGroupId != ecsGroupID {
 		t.Fatalf("expected ecsGroupId %q, got %#v", ecsGroupID, spec.EcsGroupId)
 	}
@@ -430,7 +433,7 @@ func TestNodeSpecForCandidate_DefaultsManagedK8SDataDisk(t *testing.T) {
 				},
 			},
 			Login: v1alpha1.Login{
-				UserPassword: v1alpha1.UserPassword{
+				UserPassword: &v1alpha1.UserPassword{
 					Password: "ciphertext",
 				},
 			},
@@ -490,7 +493,7 @@ func TestNodeSpecForCandidate_RejectsInvalidKubeletReservation(t *testing.T) {
 				},
 			},
 			Login: v1alpha1.Login{
-				UserPassword: v1alpha1.UserPassword{
+				UserPassword: &v1alpha1.UserPassword{
 					Password: "ciphertext",
 				},
 			},
@@ -510,6 +513,48 @@ func TestNodeSpecForCandidate_RejectsInvalidKubeletReservation(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatalf("expected invalid kubelet reservation to be rejected")
+	}
+}
+
+func TestNodeSpecForCandidate_UsesSSHKeyLogin(t *testing.T) {
+	provider := &DefaultProvider{}
+	nodeClass := &v1alpha1.CCENodeClass{
+		Spec: v1alpha1.CCENodeClassSpec{
+			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "HCE OS 2.0"},
+			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
+				Root: v1alpha1.BlockDevice{
+					VolumeSize: 120,
+					VolumeType: "SAS",
+				},
+			},
+			Login: v1alpha1.Login{
+				SSHKey: "cluster-keypair",
+			},
+		},
+	}
+
+	spec, err := provider.nodeSpecForCandidate(
+		nodeClass,
+		&karpv1.NodeClaim{},
+		nil,
+		createCandidate{
+			instanceType: &cloudprovider.InstanceType{Name: "c9.large.2"},
+			zone:         "ap-southeast-3a",
+			subnetID:     "subnet-123",
+		},
+		"HCE OS 2.0",
+	)
+	if err != nil {
+		t.Fatalf("expected node spec creation to succeed, got %v", err)
+	}
+	if spec.Login == nil {
+		t.Fatalf("expected login to be set")
+	}
+	if spec.Login.SshKey == nil || *spec.Login.SshKey != "cluster-keypair" {
+		t.Fatalf("expected ssh key login to be propagated, got %#v", spec.Login.SshKey)
+	}
+	if spec.Login.UserPassword != nil {
+		t.Fatalf("expected password login to be omitted for ssh key mode, got %#v", spec.Login.UserPassword)
 	}
 }
 
@@ -841,7 +886,7 @@ func TestCreate_AllowsEmptyServerIDInCreateNodeResponse(t *testing.T) {
 				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
 			},
 			Login: v1alpha1.Login{
-				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
+				UserPassword: &v1alpha1.UserPassword{Password: "ciphertext"},
 			},
 		},
 		Status: v1alpha1.CCENodeClassStatus{
@@ -903,7 +948,7 @@ func TestCreate_PrefersCheaperCandidate(t *testing.T) {
 				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
 			},
 			Login: v1alpha1.Login{
-				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
+				UserPassword: &v1alpha1.UserPassword{Password: "ciphertext"},
 			},
 		},
 		Status: v1alpha1.CCENodeClassStatus{
@@ -1004,7 +1049,7 @@ func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T
 				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
 			},
 			Login: v1alpha1.Login{
-				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
+				UserPassword: &v1alpha1.UserPassword{Password: "ciphertext"},
 			},
 		},
 		Status: v1alpha1.CCENodeClassStatus{
@@ -1223,7 +1268,7 @@ func newTestNodeClass() *v1alpha1.CCENodeClass {
 				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
 			},
 			Login: v1alpha1.Login{
-				UserPassword: v1alpha1.UserPassword{Password: "ciphertext"},
+				UserPassword: &v1alpha1.UserPassword{Password: "ciphertext"},
 			},
 		},
 		Status: v1alpha1.CCENodeClassStatus{

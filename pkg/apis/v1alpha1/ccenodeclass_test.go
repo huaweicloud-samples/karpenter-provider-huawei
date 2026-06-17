@@ -47,7 +47,7 @@ func TestCCENodeClassHash(t *testing.T) {
 			},
 			RuntimeConfiguration: &RuntimeConfiguration{Type: "docker"},
 			Login: Login{
-				UserPassword: UserPassword{
+				UserPassword: &UserPassword{
 					Password: "ciphertext",
 				},
 			},
@@ -78,6 +78,28 @@ func TestCCENodeClassHash(t *testing.T) {
 
 		if base.Hash() != other.Hash() {
 			t.Fatalf("expected default login username to hash same as explicit root")
+		}
+	})
+
+	t.Run("switching from password login to ssh key changes hash", func(t *testing.T) {
+		other := base.DeepCopy()
+		other.Spec.Login.UserPassword = nil
+		other.Spec.Login.SSHKey = "cluster-keypair"
+
+		if base.Hash() == other.Hash() {
+			t.Fatalf("expected login mode change to alter hash")
+		}
+	})
+
+	t.Run("ssh key changes hash", func(t *testing.T) {
+		other := base.DeepCopy()
+		other.Spec.Login.UserPassword = nil
+		other.Spec.Login.SSHKey = "cluster-keypair-a"
+		baseWithSSH := other.DeepCopy()
+		other.Spec.Login.SSHKey = "cluster-keypair-b"
+
+		if baseWithSSH.Hash() == other.Hash() {
+			t.Fatalf("expected ssh key change to alter hash")
 		}
 	})
 
@@ -128,7 +150,7 @@ func TestCCENodeClassSpecValidateForCreateNode(t *testing.T) {
 				}},
 			},
 			Login: Login{
-				UserPassword: UserPassword{Password: "ciphertext"},
+				UserPassword: &UserPassword{Password: "ciphertext"},
 			},
 		}
 	}
@@ -137,6 +159,34 @@ func TestCCENodeClassSpecValidateForCreateNode(t *testing.T) {
 		spec := validSpec()
 		if err := spec.ValidateForCreateNode(); err != nil {
 			t.Fatalf("expected validation to succeed, got %v", err)
+		}
+	})
+
+	t.Run("accepts ssh key login", func(t *testing.T) {
+		spec := validSpec()
+		spec.Login.UserPassword = nil
+		spec.Login.SSHKey = "cluster-keypair"
+
+		if err := spec.ValidateForCreateNode(); err != nil {
+			t.Fatalf("expected ssh key validation to succeed, got %v", err)
+		}
+	})
+
+	t.Run("rejects missing login method", func(t *testing.T) {
+		spec := validSpec()
+		spec.Login.UserPassword = nil
+
+		if err := spec.ValidateForCreateNode(); err == nil {
+			t.Fatalf("expected validation to fail when no login method is set")
+		}
+	})
+
+	t.Run("rejects both login methods", func(t *testing.T) {
+		spec := validSpec()
+		spec.Login.SSHKey = "cluster-keypair"
+
+		if err := spec.ValidateForCreateNode(); err == nil {
+			t.Fatalf("expected validation to fail when both login methods are set")
 		}
 	})
 

@@ -25,6 +25,4 @@ spec:
   runtimeConfiguration:
     type: containerd
   login:
-    userPassword:
-      username: root
-      password: "<salted-and-encrypted-password>"
+    sshKey: "<existing-keypair-name>"

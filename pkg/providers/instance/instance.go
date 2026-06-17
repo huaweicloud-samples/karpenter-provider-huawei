@@ -574,7 +574,15 @@ func toCCEVolume(device *v1alpha1.BlockDevice) *cceMdl.Volume {
 }
 
 func resolveLogin(nodeClass *v1alpha1.CCENodeClass) *cceMdl.Login {
-	if nodeClass == nil || strings.TrimSpace(nodeClass.Spec.Login.UserPassword.Password) == "" {
+	if nodeClass == nil {
+		return nil
+	}
+	if sshKey := strings.TrimSpace(nodeClass.Spec.Login.SSHKey); sshKey != "" {
+		return &cceMdl.Login{
+			SshKey: lo.ToPtr(sshKey),
+		}
+	}
+	if nodeClass.Spec.Login.UserPassword == nil || strings.TrimSpace(nodeClass.Spec.Login.UserPassword.Password) == "" {
 		return nil
 	}
 	username := strings.TrimSpace(nodeClass.Spec.Login.UserPassword.Username)
