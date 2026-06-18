@@ -89,6 +89,7 @@ type normalizedUserPassword struct {
 
 type normalizedLogin struct {
 	UserPassword *normalizedUserPassword
+	SSHKey       string
 }
 
 type normalizedBlockDeviceMappings struct {
@@ -157,10 +158,16 @@ type RuntimeConfiguration struct {
 }
 
 // Login defines the node login configuration.
+// +kubebuilder:validation:XValidation:message="exactly one of login.userPassword or login.sshKey must be set",rule="(has(self.userPassword) && !has(self.sshKey)) || (!has(self.userPassword) && has(self.sshKey))"
 type Login struct {
 	// UserPassword defines username/password login.
-	// +required
-	UserPassword UserPassword `json:"userPassword"`
+	// +optional
+	UserPassword *UserPassword `json:"userPassword,omitempty"`
+
+	// SSHKey is the name of an existing Huawei Cloud key pair for SSH login.
+	// +kubebuilder:validation:MinLength=1
+	// +optional
+	SSHKey string `json:"sshKey,omitempty"`
 }
 
 // UserPassword defines the node login credentials.
@@ -190,6 +197,14 @@ func (s *CCENodeClassSpec) ResolveIMSForCreateNode() (osAlias string, err error)
 func (s *CCENodeClassSpec) ValidateForCreateNode() error {
 	if s == nil {
 		return fmt.Errorf("nodeClass.spec is nil")
+	}
+	hasUserPassword := s.Login.UserPassword != nil
+	hasSSHKey := strings.TrimSpace(s.Login.SSHKey) != ""
+	if hasUserPassword == hasSSHKey {
+		return fmt.Errorf("exactly one of nodeClass.spec.login.userPassword or nodeClass.spec.login.sshKey must be set")
+	}
+	if hasUserPassword && strings.TrimSpace(s.Login.UserPassword.Password) == "" {
+		return fmt.Errorf("nodeClass.spec.login.userPassword.password is required")
 	}
 	if s.BlockDeviceMappings.Root.VolumeSize < MinRootVolumeSizeGiB {
 		return fmt.Errorf("nodeClass.spec.blockDeviceMappings.root.volumeSize must be at least %dGi", MinRootVolumeSizeGiB)
@@ -266,6 +281,14 @@ func (s *CCENodeClassSpec) normalizedLogin() normalizedLogin {
 	if s == nil {
 		return normalizedLogin{}
 	}
+	if strings.TrimSpace(s.Login.SSHKey) != "" {
+		return normalizedLogin{
+			SSHKey: strings.TrimSpace(s.Login.SSHKey),
+		}
+	}
+	if s.Login.UserPassword == nil {
+		return normalizedLogin{}
+	}
 	username := strings.TrimSpace(s.Login.UserPassword.Username)
 	if username == "" {
 		username = "root"
@@ -273,7 +296,7 @@ func (s *CCENodeClassSpec) normalizedLogin() normalizedLogin {
 	return normalizedLogin{
 		UserPassword: &normalizedUserPassword{
 			Username: username,
-			Password: s.Login.UserPassword.Password,
+			Password: strings.TrimSpace(s.Login.UserPassword.Password),
 		},
 	}
 }
