@@ -19,7 +19,7 @@ Karpenter improves the efficiency and cost of running workloads on Kubernetes cl
 
 ## Prerequisites
 
-- A **Huawei Cloud CCE cluster** running Kubernetes **1.26 - 1.34**
+- A **Huawei Cloud CCE cluster** running Kubernetes **1.26 - 1.36**
 - Huawei Cloud credentials (AK/SK), or a CCE Pod Identity-associated IAM agency, with permissions for:
   - **ECS** - Elastic Cloud Server (flavor listing, server tagging)
   - **CCE** - Cloud Container Engine (node create/delete/list)

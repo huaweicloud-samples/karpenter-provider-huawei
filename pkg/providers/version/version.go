@@ -36,7 +36,7 @@ const (
 	MinK8sVersion = "1.26"
 
 	// MaxK8sVersion is Karpenter's supported maximum version of Kubernetes.
-	MaxK8sVersion = "1.34"
+	MaxK8sVersion = "1.36"
 )
 
 // Provider provides the Kubernetes version discovered from the API server.
