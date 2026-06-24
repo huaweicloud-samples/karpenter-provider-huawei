@@ -45,11 +45,11 @@ func (in *CCENodeClass) SetConditions(conditions []status.Condition) {
 	in.Status.Conditions = conditions
 }
 
-func (in *CCENodeClass) StatusConditions() status.ConditionSet {
+func (in *CCENodeClass) StatusConditions(opts ...status.ForOption) status.ConditionSet {
 	conds := []string{
 		ConditionTypeSubnetsReady,
 	}
-	return status.NewReadyConditions(conds...).For(in)
+	return status.NewReadyConditions(conds...).For(in, opts...)
 }
 
 // Subnet contains resolved Subnet selector values utilized for node launch
