@@ -57,7 +57,7 @@ func NewControllers(
 ) []controller.Controller {
 	controllers := []controller.Controller{
 		controllersversion.NewController(versionProvider, versionProvider.UpdateVersionWithValidation),
-		status.NewController[*v1alpha1.CCENodeClass](kubeClient, mgr.GetEventRecorderFor("karpenter"), status.EmitDeprecatedMetrics),
+		status.NewController[*v1alpha1.CCENodeClass](kubeClient, mgr.GetEventRecorderFor("karpenter"), status.EmitDeprecatedMetrics), //nolint:staticcheck // SA1019: operatorpkg/status still requires record.EventRecorder
 		nodeclass.NewController(kubeClient, recorder, subnetProvider),
 		controllersinstancetype.NewController(instanceTypeProvider),
 		controllerspricing.NewController(pricingProvider, instanceTypeProvider),

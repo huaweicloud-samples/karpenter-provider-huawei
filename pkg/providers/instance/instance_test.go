@@ -959,11 +959,9 @@ func TestCreate_PrefersCheaperCandidate(t *testing.T) {
 		Spec: karpv1.NodeClaimSpec{
 			Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"ac7.2xlarge.1", "x1.6u.10g"},
-					},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"ac7.2xlarge.1", "x1.6u.10g"},
 				},
 			},
 		},
@@ -1060,11 +1058,9 @@ func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T
 		Spec: karpv1.NodeClaimSpec{
 			Requirements: []karpv1.NodeSelectorRequirementWithMinValues{
 				{
-					NodeSelectorRequirement: corev1.NodeSelectorRequirement{
-						Key:      corev1.LabelInstanceTypeStable,
-						Operator: corev1.NodeSelectorOpIn,
-						Values:   []string{"t7.xlarge.2", "t6.xlarge.2"},
-					},
+					Key:      corev1.LabelInstanceTypeStable,
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   []string{"t7.xlarge.2", "t6.xlarge.2"},
 				},
 			},
 		},
