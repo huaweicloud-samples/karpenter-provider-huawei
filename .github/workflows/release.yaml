@@ -48,8 +48,10 @@ jobs:
         echo "Release image is: $(make print-image "${make_args[@]}")"
         make docker-buildx "${make_args[@]}"
     - name: Run release
-      run: |
-        echo "Release tag is: $RELEASE_TAG"
-        make release
+      uses: goreleaser/goreleaser-action@v7
+      with:
+        distribution: goreleaser
+        version: "~> v2"
+        args: release --clean --config .goreleaser.yaml
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

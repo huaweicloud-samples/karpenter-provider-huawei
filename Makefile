@@ -1,6 +1,6 @@
 # Release variables
 RELEASE_TAG ?= $(shell git describe --abbrev=0 2>/dev/null)
-GORELEASER_VERSION ?= v1.26.2
+GORELEASER_VERSION ?= v2.16.0
 
 # Image URL to use all building/pushing image targets
 IMAGE_REPO ?= huaweiclouddeveloper
@@ -296,7 +296,7 @@ $(GOLANGCI_LINT): $(LOCALBIN)
 .PHONY: goreleaser
 goreleaser: $(GORELEASER) ## Download goreleaser locally if necessary.
 $(GORELEASER): $(LOCALBIN)
-	$(call go-install-tool,$(GORELEASER),github.com/goreleaser/goreleaser,$(GORELEASER_VERSION))
+	$(call go-install-tool,$(GORELEASER),github.com/goreleaser/goreleaser/v2,$(GORELEASER_VERSION))
 
 # go-install-tool will 'go install' any package with custom target and name of binary
 # if it doesn't exist for the current tool version and Go toolchain.
