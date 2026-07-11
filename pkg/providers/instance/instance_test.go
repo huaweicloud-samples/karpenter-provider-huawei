@@ -1014,6 +1014,7 @@ func TestCreate_PrefersCheaperCandidate(t *testing.T) {
 }
 
 func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T) {
+	availabilityCache := utils.NewOfferingAvailabilityCache(time.Minute, time.Minute)
 	cceapi := &stubCCEAPI{
 		createNodeResps: []*cceMdl.CreateNodeResponse{
 			nil,
@@ -1032,8 +1033,9 @@ func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T
 		},
 	}
 	provider := &DefaultProvider{
-		clusterID: "cluster-id",
-		cceapi:    cceapi,
+		clusterID:                 "cluster-id",
+		cceapi:                    cceapi,
+		offeringAvailabilityCache: availabilityCache,
 		subnetProvider: &stubSubnetProvider{
 			zonalSubnets: map[string]*subnet.Subnet{
 				"ap-southeast-3a": {ID: "subnet-a", Zone: "ap-southeast-3a", AvailableIPAddressCount: 100},
@@ -1109,6 +1111,9 @@ func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T
 	}
 	if got := cceapi.createNodeReqs[1].Body.Spec.Flavor; got != "t6.xlarge.2" {
 		t.Fatalf("expected second CreateNode to request fallback flavor, got %q", got)
+	}
+	if !availabilityCache.IsUnavailable(karpv1.CapacityTypeOnDemand, "t7.xlarge.2", "ap-southeast-3a") {
+		t.Fatalf("expected ENI-unsupported offering to be marked unavailable")
 	}
 }
 

@@ -194,6 +194,16 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.CCENod
 				continue
 			}
 			if isUnsupportedNetworkError(err) {
+				p.offeringAvailabilityCache.MarkUnavailable(c.capacityType, sdk.InstanceType(c.instanceType.Name), c.zone)
+				errorCode, errorMessage := serviceResponseErrorDetails(err)
+				logger.WithValues(
+					"capacity-type", c.capacityType,
+					"instance-type", c.instanceType.Name,
+					"zone", c.zone,
+					"ttl", p.offeringAvailabilityCache.TTL().String(),
+					"error-code", errorCode,
+					"error-message", errorMessage,
+				).V(1).Info("marked offering temporarily unavailable after unsupported network")
 				lastUnavailableErr = err
 				continue
 			}
