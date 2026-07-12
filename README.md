@@ -49,16 +49,17 @@ To use an existing Secret instead, set `credentials.create=false` and `credentia
 
 #### Using CCE Pod Identity
 
-Create an IAM agency with the required permissions, then install the chart with zero replicas so Helm creates the ServiceAccount used by Pod Identity:
+Create an IAM agency with the required permissions, then create the ServiceAccount used by Pod Identity:
 
 ```bash
-helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
+kubectl create namespace karpenter-provider-huawei-system \
+  --dry-run=client \
+  -o yaml | kubectl apply -f -
+
+kubectl create serviceaccount karpenter-provider-huawei-controller-manager \
   --namespace karpenter-provider-huawei-system \
-  --create-namespace \
-  --set replicaCount=0 \
-  --set podIdentity.enabled=true \
-  --set-string credentials.region=<region-id> \
-  --set-string clusterInfo.clusterID=<cce-cluster-id>
+  --dry-run=client \
+  -o yaml | kubectl apply -f -
 ```
 
 In the CCE console, [create a pod identity association](https://support.huaweicloud.com/usermanual-cce/cce_10_1110.html#section2):
@@ -66,18 +67,18 @@ In the CCE console, [create a pod identity association](https://support.huaweicl
 - ServiceAccount: `karpenter-provider-huawei-controller-manager`
 - IAM agency: `<agency-name>`
 
-Wait for the association to become ready, then start the controller:
+Wait for the association to become ready, then install the chart and reuse the existing ServiceAccount:
 
 ```bash
-helm upgrade karpenter-provider-huawei charts/karpenter-provider-huawei \
+helm install karpenter-provider-huawei charts/karpenter-provider-huawei \
   --namespace karpenter-provider-huawei-system \
-  --set replicaCount=1 \
+  --set serviceAccount.create=false \
   --set podIdentity.enabled=true \
   --set-string credentials.region=<region-id> \
   --set-string clusterInfo.clusterID=<cce-cluster-id>
 ```
 
-Do not set `credentials.accessKey` or `credentials.secretKey` when `podIdentity.enabled=true`.
+Keep `serviceAccount.create=false` on future Helm upgrades. Do not set `credentials.accessKey` or `credentials.secretKey` when `podIdentity.enabled=true`.
 
 ## Getting Started
 
