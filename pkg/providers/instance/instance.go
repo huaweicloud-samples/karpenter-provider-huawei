@@ -43,11 +43,11 @@ import (
 )
 
 const (
-	cceFlavorInsufficientErrorCode   = "cce_cm.0021"
-	cceUnsupportedNetworkErrorCode   = "cce.01400025"
+	cceFlavorInsufficientErrorCode   = "CCE_CM.0021"
+	cceUnsupportedNetworkErrorCode   = "CCE.01400025"
 	insufficientInSpecifiedAZMessage = "insufficient in specified az"
 	insufficientCapacityMessage      = "insufficient capacity"
-	eniNetworkNotSupportedMessage    = "eni network is not supported"
+	eniNetworkNotSupportedMessage    = "Eni network is not supported"
 	outOfStockMessage                = "out of stock"
 	soldOutMessage                   = "sold out"
 	sellOutMessage                   = "sell out"
@@ -823,8 +823,8 @@ func isInsufficientCapacityError(err error) bool {
 	if !errors.As(err, &serviceErr) {
 		return false
 	}
-	code := strings.ToLower(serviceErr.ErrorCode)
-	msg := strings.ToLower(serviceErr.ErrorMessage)
+	code := serviceErr.ErrorCode
+	msg := serviceErr.ErrorMessage
 
 	if code != "" {
 		return code == cceFlavorInsufficientErrorCode
@@ -848,8 +848,8 @@ func isUnsupportedNetworkError(err error) bool {
 	if !errors.As(err, &serviceErr) {
 		return false
 	}
-	code := strings.ToLower(serviceErr.ErrorCode)
-	msg := strings.ToLower(serviceErr.ErrorMessage)
+	code := serviceErr.ErrorCode
+	msg := serviceErr.ErrorMessage
 	if code == cceUnsupportedNetworkErrorCode {
 		return true
 	}
