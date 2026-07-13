@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 
 	vpcMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/model"
@@ -68,7 +67,7 @@ func (s *Subnet) Reconcile(ctx context.Context, nodeClass *v1alpha1.CCENodeClass
 		return reconcile.Result{}, fmt.Errorf("resolving subnet zones from nodes, %w", err)
 	}
 	nodeClass.Status.Subnets = lo.FlatMap(subnets, func(subnet vpcMdl.Subnet, _ int) []v1alpha1.Subnet {
-		zone := strings.TrimSpace(subnet.AvailabilityZone)
+		zone := subnet.AvailabilityZone
 		if zone != "" {
 			return []v1alpha1.Subnet{{
 				ID:   subnet.Id,
@@ -89,7 +88,7 @@ func (s *Subnet) Reconcile(ctx context.Context, nodeClass *v1alpha1.CCENodeClass
 		}}
 	})
 	if unresolved := lo.Filter(nodeClass.Status.Subnets, func(subnet v1alpha1.Subnet, _ int) bool {
-		return strings.TrimSpace(subnet.Zone) == ""
+		return subnet.Zone == ""
 	}); len(unresolved) > 0 {
 		nodeClass.StatusConditions().SetFalse(
 			v1alpha1.ConditionTypeSubnetsReady,
@@ -112,13 +111,13 @@ func (s *Subnet) subnetZonesFromNodes(ctx context.Context) (map[string][]string,
 	}
 	zones := map[string]map[string]struct{}{}
 	for _, node := range nodes.Items {
-		subnetID := strings.TrimSpace(node.Labels[subnetIDLabelKey])
+		subnetID := node.Labels[subnetIDLabelKey]
 		if subnetID == "" {
 			continue
 		}
-		zone := strings.TrimSpace(node.Labels[corev1.LabelTopologyZone])
+		zone := node.Labels[corev1.LabelTopologyZone]
 		if zone == "" {
-			zone = strings.TrimSpace(node.Labels[corev1.LabelFailureDomainBetaZone])
+			zone = node.Labels[corev1.LabelFailureDomainBetaZone]
 		}
 		if zone == "" {
 			continue

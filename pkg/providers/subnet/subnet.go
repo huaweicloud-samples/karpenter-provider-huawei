@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 
 	"github.com/awslabs/operatorpkg/serrors"
@@ -190,7 +189,7 @@ func (p *DefaultProvider) ZonalSubnetsForLaunch(ctx context.Context, nodeClass *
 			if !of.Requirements.Get(karpv1.CapacityTypeLabelKey).Has(capacityType) {
 				continue
 			}
-			zone := strings.TrimSpace(of.Requirements.Get(corev1.LabelTopologyZone).Any())
+			zone := of.Requirements.Get(corev1.LabelTopologyZone).Any()
 			if zone == "" {
 				continue
 			}
@@ -200,7 +199,7 @@ func (p *DefaultProvider) ZonalSubnetsForLaunch(ctx context.Context, nodeClass *
 	// Fallback to the discovered subnet zones if offerings don't yield any zones.
 	if zones.Len() == 0 {
 		for _, subnet := range nodeClass.Status.Subnets {
-			zone := strings.TrimSpace(subnet.Zone)
+			zone := subnet.Zone
 			if zone == "" {
 				continue
 			}
@@ -256,7 +255,7 @@ func (p *DefaultProvider) UpdateInflightIPs(request *cms.CreateAutoLaunchGroupRe
 		if _, ok := zonesBySubnetID[subnet.ID]; !ok {
 			zonesBySubnetID[subnet.ID] = sets.New[string]()
 		}
-		if zone := strings.TrimSpace(subnet.Zone); zone != "" {
+		if zone := subnet.Zone; zone != "" {
 			zonesBySubnetID[subnet.ID].Insert(zone)
 		}
 	}

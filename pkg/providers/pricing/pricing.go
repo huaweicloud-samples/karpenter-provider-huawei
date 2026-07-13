@@ -348,7 +348,6 @@ func serviceErrorPayloadFromMessage(message string) (serviceErrorPayload, bool) 
 }
 
 func isUnsupportedProductErrorCode(code string) bool {
-	code = strings.TrimSpace(code)
 	return code == bssProductNotFoundCode || code == bssWrappedProductNotFoundCode
 }
 

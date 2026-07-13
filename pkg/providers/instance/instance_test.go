@@ -51,9 +51,9 @@ func TestNodeIDFromProviderID(t *testing.T) {
 			want:       "123e4567-e89b-12d3-a456-426614174000",
 		},
 		{
-			name:       "RawUUIDWithSpaces",
+			name:       "RawUUIDWithSpacesIsPreserved",
 			providerID: "  123e4567-e89b-12d3-a456-426614174000  ",
-			want:       "123e4567-e89b-12d3-a456-426614174000",
+			want:       "  123e4567-e89b-12d3-a456-426614174000  ",
 		},
 		{
 			name:       "Empty",
@@ -61,9 +61,9 @@ func TestNodeIDFromProviderID(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			name:       "WhitespaceOnly",
+			name:       "WhitespaceOnlyIsPreserved",
 			providerID: "   ",
-			wantErr:    true,
+			want:       "   ",
 		},
 	}
 	for _, tt := range cases {
@@ -636,6 +636,36 @@ func TestValidateKubeletForCreateNode(t *testing.T) {
 		}
 		if err := ValidateKubeletForCreateNode(nodeClass); err == nil {
 			t.Fatalf("expected non-integer pid quantity to be rejected")
+		}
+	})
+
+	t.Run("rejects kubeReserved CPU with surrounding whitespace", func(t *testing.T) {
+		nodeClass := &v1alpha1.CCENodeClass{
+			Spec: v1alpha1.CCENodeClassSpec{
+				Kubelet: &v1alpha1.KubeletConfiguration{
+					KubeReserved: map[string]string{
+						string(corev1.ResourceCPU): " 1500m ",
+					},
+				},
+			},
+		}
+		if err := ValidateKubeletForCreateNode(nodeClass); err == nil {
+			t.Fatalf("expected CPU quantity with surrounding whitespace to be rejected")
+		}
+	})
+
+	t.Run("rejects systemReserved pid with surrounding whitespace", func(t *testing.T) {
+		nodeClass := &v1alpha1.CCENodeClass{
+			Spec: v1alpha1.CCENodeClassSpec{
+				Kubelet: &v1alpha1.KubeletConfiguration{
+					SystemReserved: map[string]string{
+						"pid": " 1234 ",
+					},
+				},
+			},
+		}
+		if err := ValidateKubeletForCreateNode(nodeClass); err == nil {
+			t.Fatalf("expected pid with surrounding whitespace to be rejected")
 		}
 	})
 }

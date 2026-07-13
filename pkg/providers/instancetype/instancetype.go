@@ -396,13 +396,13 @@ func (p *DefaultProvider) updateInstanceTypeOfferingsLocked(ctx context.Context,
 
 func resolveOfferingZones(zoneUniverse sets.Set[string], extraSpecs *ecsMdl.FlavorExtraSpec) sets.Set[string] {
 	defaultStatus := "normal"
-	if extraSpecs != nil && extraSpecs.Condoperationstatus != nil && strings.TrimSpace(*extraSpecs.Condoperationstatus) != "" {
+	if extraSpecs != nil && extraSpecs.Condoperationstatus != nil && *extraSpecs.Condoperationstatus != "" {
 		defaultStatus = *extraSpecs.Condoperationstatus
 	}
 	defaultAvailable := condOperationStatusAvailable(defaultStatus)
 
 	azOverrides := map[string]string{}
-	if extraSpecs != nil && extraSpecs.Condoperationaz != nil && strings.TrimSpace(*extraSpecs.Condoperationaz) != "" {
+	if extraSpecs != nil && extraSpecs.Condoperationaz != nil && *extraSpecs.Condoperationaz != "" {
 		azOverrides = parseCondOperationAZ(*extraSpecs.Condoperationaz)
 	}
 

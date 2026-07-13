@@ -131,6 +131,20 @@ func TestCCENodeClassHash(t *testing.T) {
 	})
 }
 
+func TestResolveIMSForCreateNodePreservesInput(t *testing.T) {
+	spec := &CCENodeClassSpec{
+		IMSSelector: IMSSelector{IMSFamily: " Huawei Cloud EulerOS 2.0 "},
+	}
+
+	got, err := spec.ResolveIMSForCreateNode()
+	if err != nil {
+		t.Fatalf("expected IMS family resolution to succeed, got %v", err)
+	}
+	if got != spec.IMSSelector.IMSFamily {
+		t.Fatalf("expected IMS family %q to be preserved, got %q", spec.IMSSelector.IMSFamily, got)
+	}
+}
+
 func TestCCENodeClassSpecValidateForCreateNode(t *testing.T) {
 	validSpec := func() CCENodeClassSpec {
 		return CCENodeClassSpec{
