@@ -279,6 +279,18 @@ func TestParseCondOperationAZ(t *testing.T) {
 	assertMapEntry(t, got, "cn-south-1g", "abandon")
 }
 
+func TestCondOperationStatusAvailableUsesCanonicalCase(t *testing.T) {
+	if !condOperationStatusAvailable("ABANDON") {
+		t.Fatalf("expected non-canonical status to use the permissive default")
+	}
+}
+
+func TestCondOperationStatusAvailableRejectsOBTSellout(t *testing.T) {
+	if condOperationStatusAvailable("obt_sellout") {
+		t.Fatalf("expected OBT sellout status to be unavailable")
+	}
+}
+
 func TestResolveOfferingZones_DefaultAbandon_WithOverrides(t *testing.T) {
 	universe := sets.New[string]("cn-south-2b", "cn-south-1c", "cn-south-1e", "cn-south-1f", "cn-south-1g")
 	extra := &ecsMdl.FlavorExtraSpec{

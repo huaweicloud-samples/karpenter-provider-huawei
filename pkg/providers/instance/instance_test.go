@@ -51,9 +51,9 @@ func TestNodeIDFromProviderID(t *testing.T) {
 			want:       "123e4567-e89b-12d3-a456-426614174000",
 		},
 		{
-			name:       "RawUUIDWithSpaces",
+			name:       "RawUUIDWithSpacesIsPreserved",
 			providerID: "  123e4567-e89b-12d3-a456-426614174000  ",
-			want:       "123e4567-e89b-12d3-a456-426614174000",
+			want:       "  123e4567-e89b-12d3-a456-426614174000  ",
 		},
 		{
 			name:       "Empty",
@@ -61,9 +61,9 @@ func TestNodeIDFromProviderID(t *testing.T) {
 			wantErr:    true,
 		},
 		{
-			name:       "WhitespaceOnly",
+			name:       "WhitespaceOnlyIsPreserved",
 			providerID: "   ",
-			wantErr:    true,
+			want:       "   ",
 		},
 	}
 	for _, tt := range cases {
@@ -638,6 +638,36 @@ func TestValidateKubeletForCreateNode(t *testing.T) {
 			t.Fatalf("expected non-integer pid quantity to be rejected")
 		}
 	})
+
+	t.Run("rejects kubeReserved CPU with surrounding whitespace", func(t *testing.T) {
+		nodeClass := &v1alpha1.CCENodeClass{
+			Spec: v1alpha1.CCENodeClassSpec{
+				Kubelet: &v1alpha1.KubeletConfiguration{
+					KubeReserved: map[string]string{
+						string(corev1.ResourceCPU): " 1500m ",
+					},
+				},
+			},
+		}
+		if err := ValidateKubeletForCreateNode(nodeClass); err == nil {
+			t.Fatalf("expected CPU quantity with surrounding whitespace to be rejected")
+		}
+	})
+
+	t.Run("rejects systemReserved pid with surrounding whitespace", func(t *testing.T) {
+		nodeClass := &v1alpha1.CCENodeClass{
+			Spec: v1alpha1.CCENodeClassSpec{
+				Kubelet: &v1alpha1.KubeletConfiguration{
+					SystemReserved: map[string]string{
+						"pid": " 1234 ",
+					},
+				},
+			},
+		}
+		if err := ValidateKubeletForCreateNode(nodeClass); err == nil {
+			t.Fatalf("expected pid with surrounding whitespace to be rejected")
+		}
+	})
 }
 
 func TestToCCETaints_InjectsKarpenterUnregisteredTaint(t *testing.T) {
@@ -774,6 +804,20 @@ func TestIsInsufficientCapacityError(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "LowercaseErrorCodeIsNotCanonical",
+			err: &sdkerr.ServiceResponseError{
+				ErrorCode: "cce_cm.0021",
+			},
+			want: false,
+		},
+		{
+			name: "NonCanonicalMessageCaseIsNotMatched",
+			err: &sdkerr.ServiceResponseError{
+				ErrorMessage: "Insufficient capacity",
+			},
+			want: false,
+		},
+		{
 			name: "QuotaErrorIsNotInventoryShortage",
 			err: &sdkerr.ServiceResponseError{
 				StatusCode:   400,
@@ -788,6 +832,51 @@ func TestIsInsufficientCapacityError(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := isInsufficientCapacityError(tt.err); got != tt.want {
 				t.Fatalf("expected insufficient=%v, got %v for err=%v", tt.want, got, tt.err)
+			}
+		})
+	}
+}
+
+func TestIsUnsupportedNetworkError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "CanonicalErrorCode",
+			err: &sdkerr.ServiceResponseError{
+				ErrorCode: "CCE.01400025",
+			},
+			want: true,
+		},
+		{
+			name: "LowercaseErrorCodeIsNotCanonical",
+			err: &sdkerr.ServiceResponseError{
+				ErrorCode: "cce.01400025",
+			},
+			want: false,
+		},
+		{
+			name: "CanonicalMessage",
+			err: &sdkerr.ServiceResponseError{
+				ErrorMessage: "Flavor does not support Eni network is not supported mode",
+			},
+			want: true,
+		},
+		{
+			name: "NonCanonicalMessageCaseIsNotMatched",
+			err: &sdkerr.ServiceResponseError{
+				ErrorMessage: "Flavor does not support eni network is not supported mode",
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isUnsupportedNetworkError(tt.err); got != tt.want {
+				t.Fatalf("expected unsupported network=%v, got %v for err=%v", tt.want, got, tt.err)
 			}
 		})
 	}

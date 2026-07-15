@@ -145,7 +145,7 @@ func TestCreate_AnnotatesReturnedNodeClaimWithCCENodeClassHash(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "default"},
 		Spec: v1alpha1.CCENodeClassSpec{
 			SubnetSelectorTerms: []v1alpha1.SubnetSelectorTerm{{ID: "123e4567-e89b-12d3-a456-426614174000"}},
-			IMSSelector:         v1alpha1.IMSSelector{IMSFamily: " HCE OS 2.0 "},
+			IMSSelector:         v1alpha1.IMSSelector{IMSFamily: "HCE OS 2.0"},
 			BlockDeviceMappings: v1alpha1.BlockDeviceMappings{
 				Root: v1alpha1.BlockDevice{VolumeSize: 120, VolumeType: "SAS"},
 			},

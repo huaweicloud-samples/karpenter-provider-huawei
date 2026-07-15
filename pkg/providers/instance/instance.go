@@ -43,11 +43,11 @@ import (
 )
 
 const (
-	cceFlavorInsufficientErrorCode   = "cce_cm.0021"
-	cceUnsupportedNetworkErrorCode   = "cce.01400025"
+	cceFlavorInsufficientErrorCode   = "CCE_CM.0021"
+	cceUnsupportedNetworkErrorCode   = "CCE.01400025"
 	insufficientInSpecifiedAZMessage = "insufficient in specified az"
 	insufficientCapacityMessage      = "insufficient capacity"
-	eniNetworkNotSupportedMessage    = "eni network is not supported"
+	eniNetworkNotSupportedMessage    = "Eni network is not supported"
 	outOfStockMessage                = "out of stock"
 	soldOutMessage                   = "sold out"
 	sellOutMessage                   = "sell out"
@@ -305,11 +305,11 @@ func serviceResponseErrorDetails(err error) (string, string) {
 	if !errors.As(err, &serviceErr) {
 		return "", summarizeErrorMessage(err.Error())
 	}
-	return strings.TrimSpace(serviceErr.ErrorCode), summarizeErrorMessage(serviceErr.ErrorMessage)
+	return serviceErr.ErrorCode, summarizeErrorMessage(serviceErr.ErrorMessage)
 }
 
 func summarizeErrorMessage(msg string) string {
-	msg = strings.Join(strings.Fields(strings.TrimSpace(msg)), " ")
+	msg = strings.Join(strings.Fields(msg), " ")
 	if len(msg) <= 160 {
 		return msg
 	}
@@ -336,8 +336,8 @@ func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.CCENodeClass,
 
 	subnetID := c.subnetID
 	var os *string
-	if strings.TrimSpace(osAlias) != "" {
-		os = lo.ToPtr(strings.TrimSpace(osAlias))
+	if osAlias != "" {
+		os = lo.ToPtr(osAlias)
 	}
 	spec := &cceMdl.NodeSpec{
 		Flavor:      c.instanceType.Name,
@@ -446,7 +446,7 @@ func parseReservedValues(fieldPath string, values map[string]string) (reservedVa
 }
 
 func parseQuantityAsMilliValue(fieldPath string, value string) (int32, error) {
-	quantity, err := resource.ParseQuantity(strings.TrimSpace(value))
+	quantity, err := resource.ParseQuantity(value)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be a valid CPU quantity: %w", fieldPath, err)
 	}
@@ -459,7 +459,7 @@ func parseQuantityAsMilliValue(fieldPath string, value string) (int32, error) {
 }
 
 func parseQuantityAsBinaryUnitValue(fieldPath string, value string, unitBytes int64, unitName string) (int32, error) {
-	quantity, err := resource.ParseQuantity(strings.TrimSpace(value))
+	quantity, err := resource.ParseQuantity(value)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be a valid resource quantity: %w", fieldPath, err)
 	}
@@ -476,8 +476,7 @@ func parseQuantityAsBinaryUnitValue(fieldPath string, value string, unitBytes in
 }
 
 func parsePIDValue(fieldPath string, value string) (int32, error) {
-	trimmed := strings.TrimSpace(value)
-	pidValue, err := strconv.ParseInt(trimmed, 10, 32)
+	pidValue, err := strconv.ParseInt(value, 10, 32)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be a valid integer: %w", fieldPath, err)
 	}
@@ -567,7 +566,7 @@ func resolveStorage(nodeClass *v1alpha1.CCENodeClass, rootVolumeType string) *cc
 }
 
 func toCCEVolume(device *v1alpha1.BlockDevice) *cceMdl.Volume {
-	volumeType := strings.TrimSpace(device.VolumeType)
+	volumeType := device.VolumeType
 	if volumeType == "" {
 		volumeType = "SSD"
 	}
@@ -587,15 +586,15 @@ func resolveLogin(nodeClass *v1alpha1.CCENodeClass) *cceMdl.Login {
 	if nodeClass == nil {
 		return nil
 	}
-	if sshKey := strings.TrimSpace(nodeClass.Spec.Login.SSHKey); sshKey != "" {
+	if sshKey := nodeClass.Spec.Login.SSHKey; sshKey != "" {
 		return &cceMdl.Login{
 			SshKey: lo.ToPtr(sshKey),
 		}
 	}
-	if nodeClass.Spec.Login.UserPassword == nil || strings.TrimSpace(nodeClass.Spec.Login.UserPassword.Password) == "" {
+	if nodeClass.Spec.Login.UserPassword == nil || nodeClass.Spec.Login.UserPassword.Password == "" {
 		return nil
 	}
-	username := strings.TrimSpace(nodeClass.Spec.Login.UserPassword.Username)
+	username := nodeClass.Spec.Login.UserPassword.Username
 	if username == "" {
 		username = "root"
 	}
@@ -611,7 +610,7 @@ func resolveRuntime(nodeClass *v1alpha1.CCENodeClass) *cceMdl.Runtime {
 	if nodeClass.Spec.RuntimeConfiguration == nil {
 		return nil
 	}
-	runtimeType := strings.TrimSpace(nodeClass.Spec.RuntimeConfiguration.Type)
+	runtimeType := nodeClass.Spec.RuntimeConfiguration.Type
 	if runtimeType == "" {
 		return nil
 	}
@@ -627,7 +626,7 @@ func resolveECSGroupID(nodeClass *v1alpha1.CCENodeClass) *string {
 	if nodeClass.Spec.ECSGroupID == nil {
 		return nil
 	}
-	if value := strings.TrimSpace(*nodeClass.Spec.ECSGroupID); value != "" {
+	if value := *nodeClass.Spec.ECSGroupID; value != "" {
 		return lo.ToPtr(value)
 	}
 	return nil
@@ -812,7 +811,7 @@ func instanceFromCCEShowNodeResponse(resp *cceMdl.ShowNodeResponse) *Instance {
 }
 
 func nodeIDFromProviderID(providerID string) (string, error) {
-	nodeID := strings.TrimSpace(providerID)
+	nodeID := providerID
 	if nodeID == "" {
 		return "", fmt.Errorf("providerID is empty")
 	}
@@ -824,8 +823,8 @@ func isInsufficientCapacityError(err error) bool {
 	if !errors.As(err, &serviceErr) {
 		return false
 	}
-	code := strings.ToLower(strings.TrimSpace(serviceErr.ErrorCode))
-	msg := strings.ToLower(strings.TrimSpace(serviceErr.ErrorMessage))
+	code := serviceErr.ErrorCode
+	msg := serviceErr.ErrorMessage
 
 	if code != "" {
 		return code == cceFlavorInsufficientErrorCode
@@ -849,8 +848,8 @@ func isUnsupportedNetworkError(err error) bool {
 	if !errors.As(err, &serviceErr) {
 		return false
 	}
-	code := strings.ToLower(strings.TrimSpace(serviceErr.ErrorCode))
-	msg := strings.ToLower(strings.TrimSpace(serviceErr.ErrorMessage))
+	code := serviceErr.ErrorCode
+	msg := serviceErr.ErrorMessage
 	if code == cceUnsupportedNetworkErrorCode {
 		return true
 	}

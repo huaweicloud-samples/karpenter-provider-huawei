@@ -18,7 +18,6 @@ package v1alpha1
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/mitchellh/hashstructure/v2"
 	"github.com/samber/lo"
@@ -187,7 +186,7 @@ func (s *CCENodeClassSpec) ResolveIMSForCreateNode() (osAlias string, err error)
 	if s == nil {
 		return "", fmt.Errorf("nodeClass.spec is nil")
 	}
-	osAlias = strings.TrimSpace(s.IMSSelector.IMSFamily)
+	osAlias = s.IMSSelector.IMSFamily
 	if osAlias == "" {
 		return "", fmt.Errorf("nodeClass.spec.imsSelector.imsFamily is required")
 	}
@@ -199,11 +198,11 @@ func (s *CCENodeClassSpec) ValidateForCreateNode() error {
 		return fmt.Errorf("nodeClass.spec is nil")
 	}
 	hasUserPassword := s.Login.UserPassword != nil
-	hasSSHKey := strings.TrimSpace(s.Login.SSHKey) != ""
+	hasSSHKey := s.Login.SSHKey != ""
 	if hasUserPassword == hasSSHKey {
 		return fmt.Errorf("exactly one of nodeClass.spec.login.userPassword or nodeClass.spec.login.sshKey must be set")
 	}
-	if hasUserPassword && strings.TrimSpace(s.Login.UserPassword.Password) == "" {
+	if hasUserPassword && s.Login.UserPassword.Password == "" {
 		return fmt.Errorf("nodeClass.spec.login.userPassword.password is required")
 	}
 	if s.BlockDeviceMappings.Root.VolumeSize < MinRootVolumeSizeGiB {
@@ -225,7 +224,7 @@ func (s *CCENodeClassSpec) normalizedIMSSelection() normalizedIMSSelection {
 		return normalizedIMSSelection{}
 	}
 	return normalizedIMSSelection{
-		Family: strings.TrimSpace(s.IMSSelector.IMSFamily),
+		Family: s.IMSSelector.IMSFamily,
 	}
 }
 
@@ -237,7 +236,7 @@ func normalizeBlockDevice(device *BlockDevice) normalizedVolume {
 	if size <= 0 {
 		size = 40
 	}
-	volumeType := strings.TrimSpace(device.VolumeType)
+	volumeType := device.VolumeType
 	if volumeType == "" {
 		volumeType = "SSD"
 	}
@@ -271,8 +270,8 @@ func (s *CCENodeClassSpec) normalizedBlockDeviceMappings() normalizedBlockDevice
 
 func (s *CCENodeClassSpec) normalizedRuntimeConfiguration() normalizedRuntimeConfiguration {
 	runtimeType := "containerd"
-	if s != nil && s.RuntimeConfiguration != nil && strings.TrimSpace(s.RuntimeConfiguration.Type) != "" {
-		runtimeType = strings.TrimSpace(s.RuntimeConfiguration.Type)
+	if s != nil && s.RuntimeConfiguration != nil && s.RuntimeConfiguration.Type != "" {
+		runtimeType = s.RuntimeConfiguration.Type
 	}
 	return normalizedRuntimeConfiguration{Type: runtimeType}
 }
@@ -281,22 +280,22 @@ func (s *CCENodeClassSpec) normalizedLogin() normalizedLogin {
 	if s == nil {
 		return normalizedLogin{}
 	}
-	if strings.TrimSpace(s.Login.SSHKey) != "" {
+	if s.Login.SSHKey != "" {
 		return normalizedLogin{
-			SSHKey: strings.TrimSpace(s.Login.SSHKey),
+			SSHKey: s.Login.SSHKey,
 		}
 	}
 	if s.Login.UserPassword == nil {
 		return normalizedLogin{}
 	}
-	username := strings.TrimSpace(s.Login.UserPassword.Username)
+	username := s.Login.UserPassword.Username
 	if username == "" {
 		username = "root"
 	}
 	return normalizedLogin{
 		UserPassword: &normalizedUserPassword{
 			Username: username,
-			Password: strings.TrimSpace(s.Login.UserPassword.Password),
+			Password: s.Login.UserPassword.Password,
 		},
 	}
 }
