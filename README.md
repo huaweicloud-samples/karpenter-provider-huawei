@@ -242,6 +242,7 @@ make generate   # Generate DeepCopy methods
 
 ```bash
 make helm-lint       # Lint the chart
+make helm-package    # Package the chart and regenerate charts/index.yaml
 make helm-template   # Render templates locally
 make helm-install    # Install
 make helm-upgrade    # Upgrade

@@ -1,0 +1,99 @@
+apiVersion: v1
+entries:
+  karpenter-provider-huawei:
+  - apiVersion: v2
+    appVersion: 0.3.1
+    created: "2026-07-16T10:39:35.040163732+08:00"
+    description: Huawei Cloud provider for Karpenter - Kubernetes Node Autoscaling
+    digest: caff3de2d64b359df87de91b0d54077505f4758d2c4d017f77b11a4a46a6fdf1
+    home: https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
+    keywords:
+    - karpenter
+    - autoscaling
+    - huawei
+    - cloud
+    - kubernetes
+    name: karpenter-provider-huawei
+    sources:
+    - https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
+    type: application
+    urls:
+    - karpenter-provider-huawei-0.3.1.tgz
+    version: 0.3.1
+  - apiVersion: v2
+    appVersion: 0.3.0
+    created: "2026-07-16T10:39:35.038799498+08:00"
+    description: Huawei Cloud provider for Karpenter - Kubernetes Node Autoscaling
+    digest: 3bbc71c1fbd0a4148f434500906f9eea88cc02526bdb59a2600984efd706db40
+    home: https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
+    keywords:
+    - karpenter
+    - autoscaling
+    - huawei
+    - cloud
+    - kubernetes
+    name: karpenter-provider-huawei
+    sources:
+    - https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
+    type: application
+    urls:
+    - karpenter-provider-huawei-0.3.0.tgz
+    version: 0.3.0
+  - apiVersion: v2
+    appVersion: 0.2.1
+    created: "2026-07-16T10:39:35.036695018+08:00"
+    description: Huawei Cloud provider for Karpenter - Kubernetes Node Autoscaling
+    digest: f7d7602fae17d7574359b4156766192637841713820e897a7ba1ed3901a3d010
+    home: https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
+    keywords:
+    - karpenter
+    - autoscaling
+    - huawei
+    - cloud
+    - kubernetes
+    name: karpenter-provider-huawei
+    sources:
+    - https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
+    type: application
+    urls:
+    - karpenter-provider-huawei-0.2.1.tgz
+    version: 0.2.1
+  - apiVersion: v2
+    appVersion: 0.2.0
+    created: "2026-07-16T10:39:35.034750354+08:00"
+    description: Huawei Cloud provider for Karpenter - Kubernetes Node Autoscaling
+    digest: 158a518c7bc36873a42d1ab6f44194e9b96e0cb606bcd68fd704039370094315
+    home: https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
+    keywords:
+    - karpenter
+    - autoscaling
+    - huawei
+    - cloud
+    - kubernetes
+    name: karpenter-provider-huawei
+    sources:
+    - https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
+    type: application
+    urls:
+    - karpenter-provider-huawei-0.2.0.tgz
+    version: 0.2.0
+  - apiVersion: v2
+    appVersion: 0.1.0
+    created: "2026-07-16T10:39:35.033748959+08:00"
+    description: Huawei Cloud provider for Karpenter - Kubernetes Node Autoscaling
+    digest: 7f10509299029d7cb0420f4468c3ff2b3a3e1d9589fc4bbc5ba41f855adaf6b5
+    home: https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
+    keywords:
+    - karpenter
+    - autoscaling
+    - huawei
+    - cloud
+    - kubernetes
+    name: karpenter-provider-huawei
+    sources:
+    - https://github.com/HuaweiCloudDeveloper/karpenter-provider-huawei
+    type: application
+    urls:
+    - karpenter-provider-huawei-0.1.0.tgz
+    version: 0.1.0
+generated: "2026-07-16T10:39:35.032672065+08:00"
