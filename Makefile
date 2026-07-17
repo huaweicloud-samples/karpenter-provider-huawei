@@ -175,6 +175,10 @@ HELM_NAMESPACE ?= karpenter-provider-huawei-system
 helm-lint: ## Lint the Helm chart.
 	$(HELM) lint $(HELM_CHART_DIR)
 
+.PHONY: helm-package
+helm-package: ## Package the Helm chart and regenerate the repository index.
+	HELM="$(HELM)" CHART_DIR="$(HELM_CHART_DIR)" ./hack/package-chart.sh
+
 .PHONY: helm-template
 helm-template: ## Render Helm chart templates locally.
 	$(HELM) template $(HELM_RELEASE_NAME) $(HELM_CHART_DIR) --namespace $(HELM_NAMESPACE)
