@@ -325,12 +325,8 @@ spec:
                     id:
                       description: ID of the subnet
                       type: string
-                    zone:
-                      description: The associated availability zone
-                      type: string
                   required:
                   - id
-                  - zone
                   type: object
                 type: array
             type: object

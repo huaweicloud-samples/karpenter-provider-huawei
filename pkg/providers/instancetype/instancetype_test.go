@@ -269,6 +269,144 @@ func TestRefresh_UsesSingleFetchPerRefreshAndUpdatesTypesAndOfferings(t *testing
 	}
 }
 
+func TestListUsesFlavorOfferingsWithoutSubnetZones(t *testing.T) {
+	flavors := []ecsMdl.Flavor{{
+		Id:    "flavor-a",
+		Name:  "c6.large.2",
+		Ram:   4096,
+		Vcpus: "2",
+		OsExtraSpecs: &ecsMdl.FlavorExtraSpec{
+			Condoperationstatus: stringPtr("normal"),
+			Condoperationaz:     stringPtr("cn-north-4a(normal)"),
+		},
+	}}
+	p := NewDefaultProvider(
+		&fakeECSAPI{listFlavorsFunc: func(*ecsMdl.ListFlavorsRequest) (*ecsMdl.ListFlavorsResponse, error) {
+			return &ecsMdl.ListFlavorsResponse{Flavors: &flavors}, nil
+		}},
+		cache.New(time.Minute, time.Minute),
+		cache.New(time.Minute, time.Minute),
+		nil,
+		NewDefaultResolver("cn-north-4"),
+		func(sdk.InstanceType) (float64, bool) { return 0.42, true },
+	)
+
+	if err := p.Refresh(context.Background()); err != nil {
+		t.Fatalf("refreshing instance types: %v", err)
+	}
+	instanceTypes, err := p.List(context.Background(), fakeNodeClass{})
+	if err != nil {
+		t.Fatalf("listing instance types without subnet zones: %v", err)
+	}
+	if len(instanceTypes) != 1 || len(instanceTypes[0].Offerings) != 1 {
+		t.Fatalf("expected one instance type with one offering, got %#v", instanceTypes)
+	}
+	zone := instanceTypes[0].Offerings[0].Requirements.Get(corev1.LabelTopologyZone)
+	if !zone.Has("cn-north-4a") {
+		t.Fatalf("expected offering in cn-north-4a, got %v", zone.Values())
+	}
+}
+
+func TestListUsesECSAvailabilityZonesWhenFlavorHasNoAZOverrides(t *testing.T) {
+	flavors := []ecsMdl.Flavor{{
+		Id:    "flavor-a",
+		Name:  "c6.large.2",
+		Ram:   4096,
+		Vcpus: "2",
+		OsExtraSpecs: &ecsMdl.FlavorExtraSpec{
+			Condoperationstatus: stringPtr("normal"),
+		},
+	}}
+	p := NewDefaultProvider(
+		&fakeECSAPI{
+			listFlavorsFunc: func(*ecsMdl.ListFlavorsRequest) (*ecsMdl.ListFlavorsResponse, error) {
+				return &ecsMdl.ListFlavorsResponse{Flavors: &flavors}, nil
+			},
+			listAvailabilityZonesFunc: func(*ecsMdl.ListServerAzInfoRequest) (*ecsMdl.ListServerAzInfoResponse, error) {
+				return &ecsMdl.ListServerAzInfoResponse{AvailabilityZones: &[]ecsMdl.ListServerAzInfo{{
+					AvailabilityZoneId: "cn-north-4a",
+				}}}, nil
+			},
+		},
+		cache.New(time.Minute, time.Minute),
+		cache.New(time.Minute, time.Minute),
+		nil,
+		NewDefaultResolver("cn-north-4"),
+		func(sdk.InstanceType) (float64, bool) { return 0.42, true },
+	)
+
+	if err := p.Refresh(context.Background()); err != nil {
+		t.Fatalf("refreshing instance types: %v", err)
+	}
+	instanceTypes, err := p.List(context.Background(), fakeNodeClass{})
+	if err != nil {
+		t.Fatalf("listing instance types: %v", err)
+	}
+	if len(instanceTypes) != 1 || len(instanceTypes[0].Offerings) != 1 {
+		t.Fatalf("expected one instance type with one offering, got %#v", instanceTypes)
+	}
+	zone := instanceTypes[0].Offerings[0].Requirements.Get(corev1.LabelTopologyZone)
+	if !zone.Has("cn-north-4a") {
+		t.Fatalf("expected offering in cn-north-4a, got %v", zone.Values())
+	}
+}
+
+func TestListDoesNotCreateOfferingsForGloballyUnavailableFlavor(t *testing.T) {
+	flavors := []ecsMdl.Flavor{
+		{
+			Id:    "available-flavor",
+			Name:  "c6.large.2",
+			Ram:   4096,
+			Vcpus: "2",
+			OsExtraSpecs: &ecsMdl.FlavorExtraSpec{
+				Condoperationstatus: stringPtr("normal"),
+			},
+		},
+		{
+			Id:    "unavailable-flavor",
+			Name:  "c7.large.2",
+			Ram:   4096,
+			Vcpus: "2",
+			OsExtraSpecs: &ecsMdl.FlavorExtraSpec{
+				Condoperationstatus: stringPtr("sellout"),
+			},
+		},
+	}
+	p := NewDefaultProvider(
+		&fakeECSAPI{
+			listFlavorsFunc: func(*ecsMdl.ListFlavorsRequest) (*ecsMdl.ListFlavorsResponse, error) {
+				return &ecsMdl.ListFlavorsResponse{Flavors: &flavors}, nil
+			},
+			listAvailabilityZonesFunc: func(*ecsMdl.ListServerAzInfoRequest) (*ecsMdl.ListServerAzInfoResponse, error) {
+				return &ecsMdl.ListServerAzInfoResponse{AvailabilityZones: &[]ecsMdl.ListServerAzInfo{{AvailabilityZoneId: "cn-north-4a"}}}, nil
+			},
+		},
+		cache.New(time.Minute, time.Minute),
+		cache.New(time.Minute, time.Minute),
+		nil,
+		NewDefaultResolver("cn-north-4"),
+		func(sdk.InstanceType) (float64, bool) { return 0.42, true },
+	)
+
+	if err := p.Refresh(context.Background()); err != nil {
+		t.Fatalf("refreshing instance types: %v", err)
+	}
+	instanceTypes, err := p.List(context.Background(), fakeNodeClass{})
+	if err != nil {
+		t.Fatalf("listing instance types: %v", err)
+	}
+	offeringCounts := map[string]int{}
+	for _, instanceType := range instanceTypes {
+		offeringCounts[instanceType.Name] = len(instanceType.Offerings)
+	}
+	if offeringCounts["c6.large.2"] != 1 {
+		t.Fatalf("expected available flavor to have one offering, got %#v", offeringCounts)
+	}
+	if offeringCounts["c7.large.2"] != 0 {
+		t.Fatalf("expected globally unavailable flavor to have no offerings, got %#v", offeringCounts)
+	}
+}
+
 func TestParseCondOperationAZ(t *testing.T) {
 	got := parseCondOperationAZ("cn-south-2b(normal), cn-south-1c(sellout),cn-south-1e(obt)，cn-south-1f(promotion); cn-south-1g(abandon)")
 
@@ -324,18 +462,17 @@ func TestResolveOfferingZones_DefaultSellout_WithNormalOverride(t *testing.T) {
 	assertZones(t, zones, "cn-south-1e")
 }
 
-func TestComputeRequirements_UsesSubnetZonesWhenOfferingZonesEmpty(t *testing.T) {
+func TestComputeRequirementsLeavesZonesUnsetWhenOfferingsAreEmpty(t *testing.T) {
 	flavor := ecsMdl.Flavor{
 		Name:  "c3.large",
 		Ram:   8192,
 		Vcpus: "2",
 	}
 
-	subnetZones := []string{"cn-south-2b", "cn-south-1c", "cn-south-1e", "cn-south-1f", "cn-south-1g"}
-	reqs := computeRequirements(flavor, "cn-south-1", nil, subnetZones)
+	reqs := computeRequirements(flavor, "cn-south-1", nil)
 	gotZones := sets.New(reqs.Get(corev1.LabelTopologyZone).Values()...)
-	if gotZones.Len() != 5 || !gotZones.HasAll(subnetZones...) {
-		t.Fatalf("expected zones %v, got %v", subnetZones, gotZones.UnsortedList())
+	if gotZones.Len() != 0 {
+		t.Fatalf("expected no zones without offering data, got %v", gotZones.UnsortedList())
 	}
 
 	gotRegions := sets.New(reqs.Get(corev1.LabelTopologyRegion).Values()...)
@@ -366,8 +503,8 @@ func TestCreateOfferings_InjectsOnDemandPrice(t *testing.T) {
 			Name:  "c6.large.2",
 			Ram:   4096,
 			Vcpus: "2",
-		}, "cn-north-4", []string{"cn-north-4a"}, []string{"cn-north-4a"}),
-	}, fakeNodeClass{zones: []string{"cn-north-4a"}}, sets.New[string]("cn-north-4a"))
+		}, "cn-north-4", []string{"cn-north-4a"}),
+	}, sets.New[string]("cn-north-4a"))
 
 	if len(offerings) != 1 {
 		t.Fatalf("expected 1 offering, got %d", len(offerings))
@@ -391,8 +528,8 @@ func TestCreateOfferings_UnknownOnDemandPriceUsesMaxFloat(t *testing.T) {
 			Name:  "c6.large.2",
 			Ram:   4096,
 			Vcpus: "2",
-		}, "cn-north-4", []string{"cn-north-4a"}, []string{"cn-north-4a"}),
-	}, fakeNodeClass{zones: []string{"cn-north-4a"}}, sets.New[string]("cn-north-4a"))
+		}, "cn-north-4", []string{"cn-north-4a"}),
+	}, sets.New[string]("cn-north-4a"))
 
 	if len(offerings) != 1 {
 		t.Fatalf("expected 1 offering, got %d", len(offerings))
@@ -422,8 +559,8 @@ func TestCreateOfferings_UsesUnavailableOfferingCache(t *testing.T) {
 			Name:  "c6.large.2",
 			Ram:   4096,
 			Vcpus: "2",
-		}, "cn-north-4", []string{"cn-north-4a", "cn-north-4b"}, []string{"cn-north-4a", "cn-north-4b"}),
-	}, fakeNodeClass{zones: []string{"cn-north-4a", "cn-north-4b"}}, sets.New[string]("cn-north-4a", "cn-north-4b"))
+		}, "cn-north-4", []string{"cn-north-4a", "cn-north-4b"}),
+	}, sets.New[string]("cn-north-4a", "cn-north-4b"))
 
 	if len(offerings) != 2 {
 		t.Fatalf("expected 2 offerings, got %d", len(offerings))
@@ -463,8 +600,8 @@ func TestCreateOfferings_UnavailableOfferingCacheExpires(t *testing.T) {
 			Name:  "c6.large.2",
 			Ram:   4096,
 			Vcpus: "2",
-		}, "cn-north-4", []string{"cn-north-4a"}, []string{"cn-north-4a"}),
-	}, fakeNodeClass{zones: []string{"cn-north-4a"}}, sets.New[string]("cn-north-4a"))
+		}, "cn-north-4", []string{"cn-north-4a"}),
+	}, sets.New[string]("cn-north-4a"))
 	if len(before) != 1 || before[0].Available {
 		t.Fatalf("expected offering to be unavailable before ttl expiry, got %#v", before)
 	}
@@ -477,24 +614,24 @@ func TestCreateOfferings_UnavailableOfferingCacheExpires(t *testing.T) {
 			Name:  "c6.large.2",
 			Ram:   4096,
 			Vcpus: "2",
-		}, "cn-north-4", []string{"cn-north-4a"}, []string{"cn-north-4a"}),
-	}, fakeNodeClass{zones: []string{"cn-north-4a"}}, sets.New[string]("cn-north-4a"))
+		}, "cn-north-4", []string{"cn-north-4a"}),
+	}, sets.New[string]("cn-north-4a"))
 	if len(after) != 1 || !after[0].Available {
 		t.Fatalf("expected offering to recover after ttl expiry, got %#v", after)
 	}
 }
 
 type fakeNodeClass struct {
-	zones               []string
 	kubelet             *v1alpha1.KubeletConfiguration
 	runtime             *v1alpha1.RuntimeConfiguration
 	blockDeviceMappings v1alpha1.BlockDeviceMappings
 }
 
 type fakeECSAPI struct {
-	listFlavorsFunc     func(*ecsMdl.ListFlavorsRequest) (*ecsMdl.ListFlavorsResponse, error)
-	listFlavorsCalls    int
-	listFlavorsRequests []*ecsMdl.ListFlavorsRequest
+	listFlavorsFunc           func(*ecsMdl.ListFlavorsRequest) (*ecsMdl.ListFlavorsResponse, error)
+	listAvailabilityZonesFunc func(*ecsMdl.ListServerAzInfoRequest) (*ecsMdl.ListServerAzInfoResponse, error)
+	listFlavorsCalls          int
+	listFlavorsRequests       []*ecsMdl.ListFlavorsRequest
 }
 
 func (f fakeNodeClass) KubeletConfiguration() *v1alpha1.KubeletConfiguration {
@@ -507,10 +644,6 @@ func (f fakeNodeClass) RuntimeConfiguration() *v1alpha1.RuntimeConfiguration {
 
 func (f fakeNodeClass) BlockDeviceMappings() v1alpha1.BlockDeviceMappings {
 	return f.blockDeviceMappings
-}
-
-func (f fakeNodeClass) Zones() []string {
-	return f.zones
 }
 
 func (f *fakeECSAPI) ListServersDetails(*ecsMdl.ListServersDetailsRequest) (*ecsMdl.ListServersDetailsResponse, error) {
@@ -529,6 +662,13 @@ func (f *fakeECSAPI) ListFlavors(request *ecsMdl.ListFlavorsRequest) (*ecsMdl.Li
 		return &ecsMdl.ListFlavorsResponse{}, nil
 	}
 	return f.listFlavorsFunc(request)
+}
+
+func (f *fakeECSAPI) ListServerAzInfo(request *ecsMdl.ListServerAzInfoRequest) (*ecsMdl.ListServerAzInfoResponse, error) {
+	if f.listAvailabilityZonesFunc == nil {
+		return &ecsMdl.ListServerAzInfoResponse{}, nil
+	}
+	return f.listAvailabilityZonesFunc(request)
 }
 
 func stringPtr(v string) *string {

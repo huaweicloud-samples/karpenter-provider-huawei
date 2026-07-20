@@ -106,3 +106,11 @@ func (s *ecsService) ListFlavors(request *ecsMdl.ListFlavorsRequest) (*ecsMdl.Li
 	}
 	return client.ListFlavors(request)
 }
+
+func (s *ecsService) ListServerAzInfo(request *ecsMdl.ListServerAzInfoRequest) (*ecsMdl.ListServerAzInfoResponse, error) {
+	client, err := s.getClient()
+	if err != nil {
+		return nil, err
+	}
+	return client.ListServerAzInfo(request)
+}

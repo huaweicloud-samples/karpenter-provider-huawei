@@ -18,7 +18,6 @@ package v1alpha1
 
 import (
 	"github.com/awslabs/operatorpkg/status"
-	"github.com/samber/lo"
 )
 
 const (
@@ -57,13 +56,4 @@ type Subnet struct {
 	// ID of the subnet
 	// +required
 	ID string `json:"id"`
-	// The associated availability zone
-	// +required
-	Zone string `json:"zone"`
-}
-
-func (in *CCENodeClass) Zones() []string {
-	return lo.Map(in.Status.Subnets, func(_ Subnet, i int) string {
-		return in.Status.Subnets[i].Zone
-	})
 }

@@ -24,7 +24,6 @@ import (
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/sdkerr"
 	cceMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cce/v3/model"
-	cms "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cms/v1/model"
 	vpcMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/model"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -162,12 +161,9 @@ func TestBuildCreateCandidates_SortedStable(t *testing.T) {
 		},
 	}
 
-	zonalSubnets := map[string]*subnet.Subnet{
-		"zone-a": {ID: "subnet-a", Zone: "zone-a", AvailableIPAddressCount: 100},
-		"zone-b": {ID: "subnet-b", Zone: "zone-b", AvailableIPAddressCount: 100},
-	}
+	selectedSubnet := &subnet.Subnet{ID: "subnet-a", AvailableIPAddressCount: 100}
 
-	candidates := buildCreateCandidates([]*cloudprovider.InstanceType{itB, itA}, onDemandReqs, zonalSubnets)
+	candidates := buildCreateCandidates([]*cloudprovider.InstanceType{itB, itA}, onDemandReqs, selectedSubnet)
 	if len(candidates) != 4 {
 		t.Fatalf("expected 4 candidates, got %d", len(candidates))
 	}
@@ -183,8 +179,10 @@ func TestBuildCreateCandidates_SortedStable(t *testing.T) {
 			t.Fatalf("expected order %v, got %v", want, got)
 		}
 	}
-	if candidates[0].subnetID != "subnet-a" || candidates[2].subnetID != "subnet-b" {
-		t.Fatalf("expected subnet mapping zone-a->subnet-a, zone-b->subnet-b, got %#v", candidates)
+	for _, candidate := range candidates {
+		if candidate.subnetID != selectedSubnet.ID {
+			t.Fatalf("expected all zones to use subnet %q, got %#v", selectedSubnet.ID, candidates)
+		}
 	}
 }
 
@@ -217,11 +215,9 @@ func TestBuildCreateCandidates_PrefersLowerPrice(t *testing.T) {
 		},
 	}
 
-	zonalSubnets := map[string]*subnet.Subnet{
-		"zone-a": {ID: "subnet-a", Zone: "zone-a", AvailableIPAddressCount: 100},
-	}
+	selectedSubnet := &subnet.Subnet{ID: "subnet-a", AvailableIPAddressCount: 100}
 
-	candidates := buildCreateCandidates([]*cloudprovider.InstanceType{ac7, x1}, onDemandReqs, zonalSubnets)
+	candidates := buildCreateCandidates([]*cloudprovider.InstanceType{ac7, x1}, onDemandReqs, selectedSubnet)
 	if len(candidates) != 2 {
 		t.Fatalf("expected 2 candidates, got %d", len(candidates))
 	}
@@ -929,7 +925,7 @@ func (s *stubCCEAPI) ShowJob(*cceMdl.ShowJobRequest) (*cceMdl.ShowJobResponse, e
 }
 
 type stubSubnetProvider struct {
-	zonalSubnets map[string]*subnet.Subnet
+	selectedSubnet *subnet.Subnet
 }
 
 func (s *stubSubnetProvider) LivenessProbe(*http.Request) error {
@@ -940,11 +936,11 @@ func (s *stubSubnetProvider) List(context.Context, *v1alpha1.CCENodeClass) ([]vp
 	return nil, nil
 }
 
-func (s *stubSubnetProvider) ZonalSubnetsForLaunch(context.Context, *v1alpha1.CCENodeClass, []*cloudprovider.InstanceType, string) (map[string]*subnet.Subnet, error) {
-	return s.zonalSubnets, nil
+func (s *stubSubnetProvider) SelectForLaunch(context.Context, *v1alpha1.CCENodeClass, []*cloudprovider.InstanceType, string) (*subnet.Subnet, error) {
+	return s.selectedSubnet, nil
 }
 
-func (s *stubSubnetProvider) UpdateInflightIPs(*cms.CreateAutoLaunchGroupRequest, *cms.CreateAutoLaunchGroupResponse, []*cloudprovider.InstanceType, []*subnet.Subnet, string) {
+func (s *stubSubnetProvider) ReleaseInflightIPs(*subnet.Subnet) {
 }
 
 var (
@@ -960,13 +956,9 @@ func TestCreate_AllowsEmptyServerIDInCreateNodeResponse(t *testing.T) {
 		},
 	}
 	provider := &DefaultProvider{
-		clusterID: "cluster-id",
-		cceapi:    cceapi,
-		subnetProvider: &stubSubnetProvider{
-			zonalSubnets: map[string]*subnet.Subnet{
-				"zone-a": {ID: "subnet-a", Zone: "zone-a", AvailableIPAddressCount: 100},
-			},
-		},
+		clusterID:      "cluster-id",
+		cceapi:         cceapi,
+		subnetProvider: &stubSubnetProvider{selectedSubnet: &subnet.Subnet{ID: "subnet-a", AvailableIPAddressCount: 100}},
 	}
 	nodeClass := &v1alpha1.CCENodeClass{
 		Spec: v1alpha1.CCENodeClassSpec{
@@ -979,7 +971,7 @@ func TestCreate_AllowsEmptyServerIDInCreateNodeResponse(t *testing.T) {
 			},
 		},
 		Status: v1alpha1.CCENodeClassStatus{
-			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "zone-a"}},
+			Subnets: []v1alpha1.Subnet{{ID: "subnet-a"}},
 		},
 	}
 	nodeClaim := &karpv1.NodeClaim{}
@@ -1022,13 +1014,9 @@ func TestCreate_PrefersCheaperCandidate(t *testing.T) {
 		},
 	}
 	provider := &DefaultProvider{
-		clusterID: "cluster-id",
-		cceapi:    cceapi,
-		subnetProvider: &stubSubnetProvider{
-			zonalSubnets: map[string]*subnet.Subnet{
-				"ap-southeast-3a": {ID: "subnet-a", Zone: "ap-southeast-3a", AvailableIPAddressCount: 100},
-			},
-		},
+		clusterID:      "cluster-id",
+		cceapi:         cceapi,
+		subnetProvider: &stubSubnetProvider{selectedSubnet: &subnet.Subnet{ID: "subnet-a", AvailableIPAddressCount: 100}},
 	}
 	nodeClass := &v1alpha1.CCENodeClass{
 		Spec: v1alpha1.CCENodeClassSpec{
@@ -1041,7 +1029,7 @@ func TestCreate_PrefersCheaperCandidate(t *testing.T) {
 			},
 		},
 		Status: v1alpha1.CCENodeClassStatus{
-			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "ap-southeast-3a"}},
+			Subnets: []v1alpha1.Subnet{{ID: "subnet-a"}},
 		},
 	}
 	nodeClaim := &karpv1.NodeClaim{
@@ -1125,11 +1113,7 @@ func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T
 		clusterID:                 "cluster-id",
 		cceapi:                    cceapi,
 		offeringAvailabilityCache: availabilityCache,
-		subnetProvider: &stubSubnetProvider{
-			zonalSubnets: map[string]*subnet.Subnet{
-				"ap-southeast-3a": {ID: "subnet-a", Zone: "ap-southeast-3a", AvailableIPAddressCount: 100},
-			},
-		},
+		subnetProvider:            &stubSubnetProvider{selectedSubnet: &subnet.Subnet{ID: "subnet-a", AvailableIPAddressCount: 100}},
 	}
 	nodeClass := &v1alpha1.CCENodeClass{
 		Spec: v1alpha1.CCENodeClassSpec{
@@ -1142,7 +1126,7 @@ func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T
 			},
 		},
 		Status: v1alpha1.CCENodeClassStatus{
-			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "ap-southeast-3a"}},
+			Subnets: []v1alpha1.Subnet{{ID: "subnet-a"}},
 		},
 	}
 	nodeClaim := &karpv1.NodeClaim{
@@ -1228,7 +1212,7 @@ func TestCreate_MarksUnavailableOfferingAndFallsBackOnInsufficientCapacity(t *te
 	provider := &DefaultProvider{
 		clusterID:                 "cluster-id",
 		cceapi:                    cceapi,
-		subnetProvider:            newStubSubnetProvider("ap-southeast-3a", "subnet-a"),
+		subnetProvider:            newStubSubnetProvider("subnet-a"),
 		offeringAvailabilityCache: availabilityCache,
 	}
 
@@ -1263,7 +1247,7 @@ func TestCreate_SkipsUnavailableOfferingsOnSubsequentCalls(t *testing.T) {
 	provider := &DefaultProvider{
 		clusterID:                 "cluster-id",
 		cceapi:                    cceapi,
-		subnetProvider:            newStubSubnetProvider("ap-southeast-3a", "subnet-a"),
+		subnetProvider:            newStubSubnetProvider("subnet-a"),
 		offeringAvailabilityCache: availabilityCache,
 	}
 
@@ -1295,7 +1279,7 @@ func TestCreate_ReturnsInsufficientCapacityWhenAllCompatibleOfferingsTemporarily
 	provider := &DefaultProvider{
 		clusterID:                 "cluster-id",
 		cceapi:                    cceapi,
-		subnetProvider:            newStubSubnetProvider("ap-southeast-3a", "subnet-a"),
+		subnetProvider:            newStubSubnetProvider("subnet-a"),
 		offeringAvailabilityCache: availabilityCache,
 	}
 
@@ -1322,14 +1306,9 @@ func TestCreate_UnavailableOfferingCacheIsZoneScoped(t *testing.T) {
 		},
 	}
 	provider := &DefaultProvider{
-		clusterID: "cluster-id",
-		cceapi:    cceapi,
-		subnetProvider: &stubSubnetProvider{
-			zonalSubnets: map[string]*subnet.Subnet{
-				"ap-southeast-3a": {ID: "subnet-a", Zone: "ap-southeast-3a", AvailableIPAddressCount: 100},
-				"ap-southeast-3b": {ID: "subnet-b", Zone: "ap-southeast-3b", AvailableIPAddressCount: 100},
-			},
-		},
+		clusterID:                 "cluster-id",
+		cceapi:                    cceapi,
+		subnetProvider:            &stubSubnetProvider{selectedSubnet: &subnet.Subnet{ID: "subnet-a", AvailableIPAddressCount: 100}},
 		offeringAvailabilityCache: availabilityCache,
 	}
 
@@ -1348,6 +1327,9 @@ func TestCreate_UnavailableOfferingCacheIsZoneScoped(t *testing.T) {
 	if got := cceapi.createNodeReqs[0].Body.Spec.Az; got != "ap-southeast-3b" {
 		t.Fatalf("expected CreateNode to target unaffected zone %q, got %q", "ap-southeast-3b", got)
 	}
+	if got := lo.FromPtr(cceapi.createNodeReqs[0].Body.Spec.NodeNicSpec.PrimaryNic.SubnetId); got != "subnet-a" {
+		t.Fatalf("expected CreateNode in zone-b to reuse subnet-a, got %q", got)
+	}
 }
 
 func newTestNodeClass() *v1alpha1.CCENodeClass {
@@ -1362,16 +1344,14 @@ func newTestNodeClass() *v1alpha1.CCENodeClass {
 			},
 		},
 		Status: v1alpha1.CCENodeClassStatus{
-			Subnets: []v1alpha1.Subnet{{ID: "subnet-a", Zone: "ap-southeast-3a"}},
+			Subnets: []v1alpha1.Subnet{{ID: "subnet-a"}},
 		},
 	}
 }
 
-func newStubSubnetProvider(zone, subnetID string) *stubSubnetProvider {
+func newStubSubnetProvider(subnetID string) *stubSubnetProvider {
 	return &stubSubnetProvider{
-		zonalSubnets: map[string]*subnet.Subnet{
-			zone: {ID: subnetID, Zone: zone, AvailableIPAddressCount: 100},
-		},
+		selectedSubnet: &subnet.Subnet{ID: subnetID, AvailableIPAddressCount: 100},
 	}
 }
 
