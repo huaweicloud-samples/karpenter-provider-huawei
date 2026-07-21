@@ -34,7 +34,9 @@ type CCENodeClassSpec struct {
 	// The following markers will use OpenAPI v3 schema to validate the value
 	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
 
-	// SubnetSelectorTerms is a list of subnet selector terms. The terms are ORed.
+	// SubnetSelectorTerms selects VPC subnets for CCE node networking. The terms are ORed.
+	// Huawei Cloud VPC subnets are not bound to an AZ.
+	// See https://support.huaweicloud.com/api-vpc/vpc_subnet01_0002.html
 	// +kubebuilder:validation:XValidation:message="subnetSelectorTerms cannot be empty",rule="self.size() != 0"
 	// +kubebuilder:validation:XValidation:message="expected at least one, got none, ['name', 'id']",rule="self.all(x, has(x.name) || has(x.id))"
 	// +kubebuilder:validation:MaxItems:=30

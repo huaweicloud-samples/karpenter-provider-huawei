@@ -161,7 +161,7 @@ func (p *DefaultProvider) SelectForLaunch(_ context.Context, nodeClass *v1alpha1
 		}
 	}
 
-	// Select the subnet with the most available IPs. The chosen subnet can be used in every offering zone.
+	// Select the subnet with the most available IPs.
 	selectedSubnetID := ""
 	var selectedSubnetAvailableIPs int32 = -1
 	for _, subnet := range nodeClass.Status.Subnets {
