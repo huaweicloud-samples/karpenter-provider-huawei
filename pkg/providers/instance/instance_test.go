@@ -285,7 +285,6 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 	spec, err := provider.nodeSpecForCandidate(
 		nodeClass,
 		nodeClaim,
-		nil,
 		createCandidate{
 			instanceType: &cloudprovider.InstanceType{Name: "c9.large.2"},
 			zone:         "ap-southeast-3a",
@@ -439,7 +438,6 @@ func TestNodeSpecForCandidate_DefaultsManagedK8SDataDisk(t *testing.T) {
 	spec, err := provider.nodeSpecForCandidate(
 		nodeClass,
 		&karpv1.NodeClaim{},
-		nil,
 		createCandidate{
 			instanceType: &cloudprovider.InstanceType{Name: "c9.large.2"},
 			zone:         "ap-southeast-3a",
@@ -499,7 +497,6 @@ func TestNodeSpecForCandidate_RejectsInvalidKubeletReservation(t *testing.T) {
 	_, err := provider.nodeSpecForCandidate(
 		nodeClass,
 		&karpv1.NodeClaim{},
-		nil,
 		createCandidate{
 			instanceType: &cloudprovider.InstanceType{Name: "c9.large.2"},
 			zone:         "ap-southeast-3a",
@@ -532,7 +529,6 @@ func TestNodeSpecForCandidate_UsesSSHKeyLogin(t *testing.T) {
 	spec, err := provider.nodeSpecForCandidate(
 		nodeClass,
 		&karpv1.NodeClaim{},
-		nil,
 		createCandidate{
 			instanceType: &cloudprovider.InstanceType{Name: "c9.large.2"},
 			zone:         "ap-southeast-3a",
@@ -988,7 +984,7 @@ func TestCreate_AllowsEmptyServerIDInCreateNodeResponse(t *testing.T) {
 		},
 	}}
 
-	instance, err := provider.Create(context.Background(), nodeClass, nodeClaim, nil, instanceTypes)
+	instance, err := provider.Create(context.Background(), nodeClass, nodeClaim, instanceTypes)
 	if err != nil {
 		t.Fatalf("expected create to succeed without server id, got %v", err)
 	}
@@ -1072,7 +1068,7 @@ func TestCreate_PrefersCheaperCandidate(t *testing.T) {
 		},
 	}
 
-	instance, err := provider.Create(context.Background(), nodeClass, nodeClaim, nil, instanceTypes)
+	instance, err := provider.Create(context.Background(), nodeClass, nodeClaim, instanceTypes)
 	if err != nil {
 		t.Fatalf("expected create to succeed, got %v", err)
 	}
@@ -1169,7 +1165,7 @@ func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T
 		},
 	}
 
-	instance, err := provider.Create(context.Background(), nodeClass, nodeClaim, nil, instanceTypes)
+	instance, err := provider.Create(context.Background(), nodeClass, nodeClaim, instanceTypes)
 	if err != nil {
 		t.Fatalf("expected create to succeed after falling back to next candidate, got %v", err)
 	}
@@ -1187,6 +1183,45 @@ func TestCreate_FallsBackWhenCheapestFlavorDoesNotSupportENINetwork(t *testing.T
 	}
 	if !availabilityCache.IsUnavailable(karpv1.CapacityTypeOnDemand, "t7.xlarge.2", "ap-southeast-3a") {
 		t.Fatalf("expected ENI-unsupported offering to be marked unavailable")
+	}
+}
+
+func TestCreate_FallsBackWhenAvailabilityCacheIsNil(t *testing.T) {
+	cceapi := &stubCCEAPI{
+		createNodeResps: []*cceMdl.CreateNodeResponse{
+			nil,
+			{
+				Metadata: &cceMdl.NodeMetadata{Uid: lo.ToPtr("node-789")},
+				Status:   &cceMdl.NodeStatus{},
+			},
+		},
+		createNodeErrs: []error{
+			&sdkerr.ServiceResponseError{
+				StatusCode:   409,
+				ErrorCode:    "CCE_CM.0021",
+				ErrorMessage: "[x1e.12u.96g|ap-southeast-3a] flavor is insufficient in specified az",
+			},
+			nil,
+		},
+	}
+	provider := &DefaultProvider{
+		clusterID:      "cluster-id",
+		cceapi:         cceapi,
+		subnetProvider: newStubSubnetProvider(),
+	}
+
+	instance, err := provider.Create(context.Background(), newTestNodeClass(), &karpv1.NodeClaim{}, []*cloudprovider.InstanceType{
+		newOnDemandInstanceType("x1e.12u.96g", 1.0, "ap-southeast-3a"),
+		newOnDemandInstanceType("c7.4xlarge.2", 2.0, "ap-southeast-3a"),
+	})
+	if err != nil {
+		t.Fatalf("expected create to succeed after fallback without an availability cache, got %v", err)
+	}
+	if instance.Flavor != "c7.4xlarge.2" {
+		t.Fatalf("expected fallback flavor %q, got %q", "c7.4xlarge.2", instance.Flavor)
+	}
+	if len(cceapi.createNodeReqs) != 2 {
+		t.Fatalf("expected two CreateNode calls, got %d", len(cceapi.createNodeReqs))
 	}
 }
 
@@ -1212,11 +1247,11 @@ func TestCreate_MarksUnavailableOfferingAndFallsBackOnInsufficientCapacity(t *te
 	provider := &DefaultProvider{
 		clusterID:                 "cluster-id",
 		cceapi:                    cceapi,
-		subnetProvider:            newStubSubnetProvider("subnet-a"),
+		subnetProvider:            newStubSubnetProvider(),
 		offeringAvailabilityCache: availabilityCache,
 	}
 
-	instance, err := provider.Create(context.Background(), newTestNodeClass(), &karpv1.NodeClaim{}, nil, []*cloudprovider.InstanceType{
+	instance, err := provider.Create(context.Background(), newTestNodeClass(), &karpv1.NodeClaim{}, []*cloudprovider.InstanceType{
 		newOnDemandInstanceType("x1e.12u.96g", 1.0, "ap-southeast-3a"),
 		newOnDemandInstanceType("c7.4xlarge.2", 2.0, "ap-southeast-3a"),
 	})
@@ -1247,11 +1282,11 @@ func TestCreate_SkipsUnavailableOfferingsOnSubsequentCalls(t *testing.T) {
 	provider := &DefaultProvider{
 		clusterID:                 "cluster-id",
 		cceapi:                    cceapi,
-		subnetProvider:            newStubSubnetProvider("subnet-a"),
+		subnetProvider:            newStubSubnetProvider(),
 		offeringAvailabilityCache: availabilityCache,
 	}
 
-	instance, err := provider.Create(context.Background(), newTestNodeClass(), &karpv1.NodeClaim{}, nil, []*cloudprovider.InstanceType{
+	instance, err := provider.Create(context.Background(), newTestNodeClass(), &karpv1.NodeClaim{}, []*cloudprovider.InstanceType{
 		newOnDemandInstanceType("x1e.12u.96g", 1.0, "ap-southeast-3a"),
 		newOnDemandInstanceType("c7.4xlarge.2", 2.0, "ap-southeast-3a"),
 		newOnDemandInstanceType("m7.4xlarge.2", 3.0, "ap-southeast-3a"),
@@ -1279,11 +1314,11 @@ func TestCreate_ReturnsInsufficientCapacityWhenAllCompatibleOfferingsTemporarily
 	provider := &DefaultProvider{
 		clusterID:                 "cluster-id",
 		cceapi:                    cceapi,
-		subnetProvider:            newStubSubnetProvider("subnet-a"),
+		subnetProvider:            newStubSubnetProvider(),
 		offeringAvailabilityCache: availabilityCache,
 	}
 
-	_, err := provider.Create(context.Background(), newTestNodeClass(), &karpv1.NodeClaim{}, nil, []*cloudprovider.InstanceType{
+	_, err := provider.Create(context.Background(), newTestNodeClass(), &karpv1.NodeClaim{}, []*cloudprovider.InstanceType{
 		newOnDemandInstanceType("x1e.12u.96g", 1.0, "ap-southeast-3a"),
 		newOnDemandInstanceType("c7.4xlarge.2", 2.0, "ap-southeast-3a"),
 	})
@@ -1312,7 +1347,7 @@ func TestCreate_UnavailableOfferingCacheIsZoneScoped(t *testing.T) {
 		offeringAvailabilityCache: availabilityCache,
 	}
 
-	instance, err := provider.Create(context.Background(), newTestNodeClass(), &karpv1.NodeClaim{}, nil, []*cloudprovider.InstanceType{
+	instance, err := provider.Create(context.Background(), newTestNodeClass(), &karpv1.NodeClaim{}, []*cloudprovider.InstanceType{
 		newOnDemandInstanceType("x1e.12u.96g", 1.0, "ap-southeast-3a", "ap-southeast-3b"),
 	})
 	if err != nil {
@@ -1349,9 +1384,9 @@ func newTestNodeClass() *v1alpha1.CCENodeClass {
 	}
 }
 
-func newStubSubnetProvider(subnetID string) *stubSubnetProvider {
+func newStubSubnetProvider() *stubSubnetProvider {
 	return &stubSubnetProvider{
-		selectedSubnet: &subnet.Subnet{ID: subnetID, AvailableIPAddressCount: 100},
+		selectedSubnet: &subnet.Subnet{ID: "subnet-a", AvailableIPAddressCount: 100},
 	}
 }
 

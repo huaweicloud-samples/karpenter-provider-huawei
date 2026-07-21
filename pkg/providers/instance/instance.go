@@ -26,7 +26,6 @@ import (
 
 	"github.com/huaweicloud/huaweicloud-sdk-go-v3/core/sdkerr"
 	cceMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cce/v3/model"
-	ecsMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/model"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -77,26 +76,23 @@ func (v reservedValues) Empty() bool {
 }
 
 type Provider interface {
-	Create(context.Context, *v1alpha1.CCENodeClass, *karpv1.NodeClaim, map[string]string, []*cloudprovider.InstanceType) (*Instance, error)
+	Create(context.Context, *v1alpha1.CCENodeClass, *karpv1.NodeClaim, []*cloudprovider.InstanceType) (*Instance, error)
 	Get(context.Context, string) (*Instance, error)
 	List(context.Context) ([]*Instance, error)
 	Delete(context.Context, string) error
-	CreateTags(context.Context, string, map[string]string) error
 }
 
 type DefaultProvider struct {
 	clusterID                 string
 	cceapi                    sdk.CCEAPI
-	ecsapi                    sdk.ECSAPI
 	subnetProvider            subnet.Provider
 	offeringAvailabilityCache *utils.OfferingAvailabilityCache
 }
 
-func NewDefaultProvider(clusterID string, cceapi sdk.CCEAPI, ecsapi sdk.ECSAPI, subnetProvider subnet.Provider, offeringAvailabilityCache *utils.OfferingAvailabilityCache) Provider {
+func NewDefaultProvider(clusterID string, cceapi sdk.CCEAPI, subnetProvider subnet.Provider, offeringAvailabilityCache *utils.OfferingAvailabilityCache) Provider {
 	return &DefaultProvider{
 		clusterID:                 clusterID,
 		cceapi:                    cceapi,
-		ecsapi:                    ecsapi,
 		subnetProvider:            subnetProvider,
 		offeringAvailabilityCache: offeringAvailabilityCache,
 	}
@@ -110,7 +106,7 @@ type createCandidate struct {
 	subnetID     string
 }
 
-func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.CCENodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, instanceTypes []*cloudprovider.InstanceType) (*Instance, error) {
+func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.CCENodeClass, nodeClaim *karpv1.NodeClaim, instanceTypes []*cloudprovider.InstanceType) (*Instance, error) {
 	logger := log.FromContext(ctx)
 
 	if p.clusterID == "" {
@@ -165,7 +161,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.CCENod
 
 	var lastUnavailableErr error
 	for _, c := range filteredCandidates {
-		spec, err := p.nodeSpecForCandidate(nodeClass, nodeClaim, tags, c, osAlias)
+		spec, err := p.nodeSpecForCandidate(nodeClass, nodeClaim, c, osAlias)
 		if err != nil {
 			return nil, err
 		}
@@ -187,16 +183,18 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.CCENod
 			default:
 				return nil, err
 			}
-			p.offeringAvailabilityCache.MarkUnavailable(c.capacityType, sdk.InstanceType(c.instanceType.Name), c.zone)
-			errorCode, errorMessage := serviceResponseErrorDetails(err)
-			logger.WithValues(
-				"capacity-type", c.capacityType,
-				"instance-type", c.instanceType.Name,
-				"zone", c.zone,
-				"ttl", p.offeringAvailabilityCache.TTL().String(),
-				"error-code", errorCode,
-				"error-message", errorMessage,
-			).V(1).Info(logMessage)
+			if p.offeringAvailabilityCache != nil {
+				p.offeringAvailabilityCache.MarkUnavailable(c.capacityType, sdk.InstanceType(c.instanceType.Name), c.zone)
+				errorCode, errorMessage := serviceResponseErrorDetails(err)
+				logger.WithValues(
+					"capacity-type", c.capacityType,
+					"instance-type", c.instanceType.Name,
+					"zone", c.zone,
+					"ttl", p.offeringAvailabilityCache.TTL().String(),
+					"error-code", errorCode,
+					"error-message", errorMessage,
+				).V(1).Info(logMessage)
+			}
 			lastUnavailableErr = err
 			continue
 		}
@@ -264,9 +262,6 @@ func buildCreateCandidates(instanceTypes []*cloudprovider.InstanceType, reqs sch
 }
 
 func (p *DefaultProvider) filterUnavailableCandidates(candidates []createCandidate) ([]createCandidate, int) {
-	if p.offeringAvailabilityCache == nil {
-		return candidates, 0
-	}
 	filtered := make([]createCandidate, 0, len(candidates))
 	skipped := 0
 	for _, candidate := range candidates {
@@ -306,7 +301,7 @@ func summarizeErrorMessage(msg string) string {
 	return msg[:157] + "..."
 }
 
-func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.CCENodeClass, nodeClaim *karpv1.NodeClaim, tags map[string]string, c createCandidate, osAlias string) (*cceMdl.NodeSpec, error) {
+func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.CCENodeClass, nodeClaim *karpv1.NodeClaim, c createCandidate, osAlias string) (*cceMdl.NodeSpec, error) {
 	rootVolume := resolveRootVolume(nodeClass)
 	dataVolumes := resolveDataVolumes(nodeClass, rootVolume.Volumetype)
 	storage := resolveStorage(nodeClass, rootVolume.Volumetype)
@@ -318,11 +313,9 @@ func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.CCENodeClass,
 		return nil, err
 	}
 
-	k8sTags := map[string]string{}
-	for k, v := range tags {
-		k8sTags[k] = v
+	k8sTags := map[string]string{
+		"karpenter.k8s.huawei/nodeclaim-uid": string(nodeClaim.UID),
 	}
-	k8sTags["karpenter.k8s.huawei/nodeclaim-uid"] = string(nodeClaim.UID)
 
 	subnetID := c.subnetID
 	var os *string
@@ -733,36 +726,6 @@ func (p *DefaultProvider) Delete(ctx context.Context, providerID string) error {
 		return err
 	}
 	return nil
-}
-
-func (p *DefaultProvider) CreateTags(ctx context.Context, serverID string, tags map[string]string) error {
-	_ = ctx
-
-	if p.ecsapi == nil {
-		return fmt.Errorf("ecsapi is nil")
-	}
-	if len(tags) == 0 {
-		return nil
-	}
-	tagList := make([]ecsMdl.BatchAddServerTag, 0, len(tags))
-	for k, v := range tags {
-		var value *string
-		if v != "" {
-			value = lo.ToPtr(v)
-		}
-		tagList = append(tagList, ecsMdl.BatchAddServerTag{
-			Key:   k,
-			Value: value,
-		})
-	}
-	_, err := p.ecsapi.BatchCreateServerTags(&ecsMdl.BatchCreateServerTagsRequest{
-		ServerId: serverID,
-		Body: &ecsMdl.BatchCreateServerTagsRequestBody{
-			Action: ecsMdl.GetBatchCreateServerTagsRequestBodyActionEnum().CREATE,
-			Tags:   tagList,
-		},
-	})
-	return err
 }
 
 func instanceFromCCENodeParts(metadata *cceMdl.NodeMetadata, spec *cceMdl.NodeSpec, status *cceMdl.NodeStatus) *Instance {
