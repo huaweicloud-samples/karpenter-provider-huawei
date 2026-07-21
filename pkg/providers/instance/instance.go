@@ -178,35 +178,27 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.CCENod
 			},
 		})
 		if err != nil {
-			if isInsufficientCapacityError(err) {
-				p.offeringAvailabilityCache.MarkUnavailable(c.capacityType, sdk.InstanceType(c.instanceType.Name), c.zone)
-				errorCode, errorMessage := serviceResponseErrorDetails(err)
-				logger.WithValues(
-					"capacity-type", c.capacityType,
-					"instance-type", c.instanceType.Name,
-					"zone", c.zone,
-					"ttl", p.offeringAvailabilityCache.TTL().String(),
-					"error-code", errorCode,
-					"error-message", errorMessage,
-				).V(1).Info("marked offering temporarily unavailable after insufficient capacity")
-				lastUnavailableErr = err
-				continue
+			var logMessage string
+			switch {
+			case isInsufficientCapacityError(err):
+				logMessage = "marked offering temporarily unavailable after insufficient capacity"
+			case isUnsupportedNetworkError(err):
+				logMessage = "marked offering temporarily unavailable after unsupported network"
+			default:
+				return nil, err
 			}
-			if isUnsupportedNetworkError(err) {
-				p.offeringAvailabilityCache.MarkUnavailable(c.capacityType, sdk.InstanceType(c.instanceType.Name), c.zone)
-				errorCode, errorMessage := serviceResponseErrorDetails(err)
-				logger.WithValues(
-					"capacity-type", c.capacityType,
-					"instance-type", c.instanceType.Name,
-					"zone", c.zone,
-					"ttl", p.offeringAvailabilityCache.TTL().String(),
-					"error-code", errorCode,
-					"error-message", errorMessage,
-				).V(1).Info("marked offering temporarily unavailable after unsupported network")
-				lastUnavailableErr = err
-				continue
-			}
-			return nil, err
+			p.offeringAvailabilityCache.MarkUnavailable(c.capacityType, sdk.InstanceType(c.instanceType.Name), c.zone)
+			errorCode, errorMessage := serviceResponseErrorDetails(err)
+			logger.WithValues(
+				"capacity-type", c.capacityType,
+				"instance-type", c.instanceType.Name,
+				"zone", c.zone,
+				"ttl", p.offeringAvailabilityCache.TTL().String(),
+				"error-code", errorCode,
+				"error-message", errorMessage,
+			).V(1).Info(logMessage)
+			lastUnavailableErr = err
+			continue
 		}
 		if resp == nil || resp.Metadata == nil || resp.Metadata.Uid == nil {
 			return nil, fmt.Errorf("CreateNode succeeded but response metadata.uid is empty")
@@ -507,9 +499,6 @@ func resolveDataVolumes(nodeClass *v1alpha1.CCENodeClass, rootVolumeType string)
 	}
 	for i := range nodeClass.Spec.BlockDeviceMappings.Users {
 		volumes = append(volumes, *toCCEVolume(&nodeClass.Spec.BlockDeviceMappings.Users[i]))
-	}
-	if len(volumes) == 0 {
-		return nil
 	}
 	return lo.ToPtr(volumes)
 }
