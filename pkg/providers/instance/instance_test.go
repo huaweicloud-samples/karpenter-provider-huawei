@@ -131,6 +131,58 @@ func TestInstanceFromCCENodeParts_HandlesMissingNodeNicSpec(t *testing.T) {
 	}
 }
 
+func TestGetMapsCCENodeResponse(t *testing.T) {
+	provider := &DefaultProvider{
+		clusterID: "cluster-id",
+		cceapi: &stubCCEAPI{
+			showNodeResp: &cceMdl.ShowNodeResponse{
+				Metadata: &cceMdl.NodeMetadata{Uid: lo.ToPtr("node-123")},
+				Spec: &cceMdl.NodeSpec{
+					Flavor: "c9.large.2",
+					Az:     "ap-southeast-3a",
+					NodeNicSpec: &cceMdl.NodeNicSpec{
+						PrimaryNic: &cceMdl.NicSpec{SubnetId: lo.ToPtr("subnet-123")},
+					},
+				},
+				Status: &cceMdl.NodeStatus{ServerId: lo.ToPtr("server-123")},
+			},
+		},
+	}
+
+	got, err := provider.Get(context.Background(), "node-123")
+	if err != nil {
+		t.Fatalf("expected get to succeed, got %v", err)
+	}
+	if got.NodeID != "node-123" || got.ServerID != "server-123" || got.Flavor != "c9.large.2" || got.Zone != "ap-southeast-3a" || got.SubnetID != "subnet-123" {
+		t.Fatalf("expected CCE node fields to be mapped, got %#v", got)
+	}
+}
+
+func TestListFiltersNodesWithoutNodeID(t *testing.T) {
+	provider := &DefaultProvider{
+		clusterID: "cluster-id",
+		cceapi: &stubCCEAPI{
+			listNodesResp: &cceMdl.ListNodesResponse{
+				Items: lo.ToPtr([]cceMdl.Node{
+					{Metadata: &cceMdl.NodeMetadata{}},
+					{
+						Metadata: &cceMdl.NodeMetadata{Uid: lo.ToPtr("node-123")},
+						Spec:     &cceMdl.NodeSpec{Flavor: "c9.large.2", Az: "ap-southeast-3a"},
+					},
+				}),
+			},
+		},
+	}
+
+	got, err := provider.List(context.Background())
+	if err != nil {
+		t.Fatalf("expected list to succeed, got %v", err)
+	}
+	if len(got) != 1 || got[0].NodeID != "node-123" {
+		t.Fatalf("expected only node with an id to be returned, got %#v", got)
+	}
+}
+
 func TestBuildCreateCandidates_SortedStable(t *testing.T) {
 	onDemandReqs := scheduling.NewRequirements(
 		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, karpv1.CapacityTypeOnDemand),
@@ -236,7 +288,6 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 	userVolumeSize := int32(100)
 	ecsGroupID := "46ebaf04-ca42-48ca-8057-0b96e6126e1b"
 	maxPods := int32(64)
-	provider := &DefaultProvider{}
 	nodeClass := &v1alpha1.CCENodeClass{
 		Spec: v1alpha1.CCENodeClassSpec{
 			ECSGroupID:  &ecsGroupID,
@@ -282,7 +333,7 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 		},
 	}
 	nodeClaim := &karpv1.NodeClaim{}
-	spec, err := provider.nodeSpecForCandidate(
+	spec, err := nodeSpecForCandidate(
 		nodeClass,
 		nodeClaim,
 		createCandidate{
@@ -417,7 +468,6 @@ func TestNodeSpecForCandidate_MapsNewNodeClassFields(t *testing.T) {
 }
 
 func TestNodeSpecForCandidate_DefaultsManagedK8SDataDisk(t *testing.T) {
-	provider := &DefaultProvider{}
 	nodeClass := &v1alpha1.CCENodeClass{
 		Spec: v1alpha1.CCENodeClassSpec{
 			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "HCE OS 2.0"},
@@ -435,7 +485,7 @@ func TestNodeSpecForCandidate_DefaultsManagedK8SDataDisk(t *testing.T) {
 		},
 	}
 
-	spec, err := provider.nodeSpecForCandidate(
+	spec, err := nodeSpecForCandidate(
 		nodeClass,
 		&karpv1.NodeClaim{},
 		createCandidate{
@@ -471,7 +521,6 @@ func TestNodeSpecForCandidate_DefaultsManagedK8SDataDisk(t *testing.T) {
 }
 
 func TestNodeSpecForCandidate_RejectsInvalidKubeletReservation(t *testing.T) {
-	provider := &DefaultProvider{}
 	nodeClass := &v1alpha1.CCENodeClass{
 		Spec: v1alpha1.CCENodeClassSpec{
 			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "HCE OS 2.0"},
@@ -494,7 +543,7 @@ func TestNodeSpecForCandidate_RejectsInvalidKubeletReservation(t *testing.T) {
 		},
 	}
 
-	_, err := provider.nodeSpecForCandidate(
+	_, err := nodeSpecForCandidate(
 		nodeClass,
 		&karpv1.NodeClaim{},
 		createCandidate{
@@ -510,7 +559,6 @@ func TestNodeSpecForCandidate_RejectsInvalidKubeletReservation(t *testing.T) {
 }
 
 func TestNodeSpecForCandidate_UsesSSHKeyLogin(t *testing.T) {
-	provider := &DefaultProvider{}
 	nodeClass := &v1alpha1.CCENodeClass{
 		Spec: v1alpha1.CCENodeClassSpec{
 			IMSSelector: v1alpha1.IMSSelector{IMSFamily: "HCE OS 2.0"},
@@ -526,7 +574,7 @@ func TestNodeSpecForCandidate_UsesSSHKeyLogin(t *testing.T) {
 		},
 	}
 
-	spec, err := provider.nodeSpecForCandidate(
+	spec, err := nodeSpecForCandidate(
 		nodeClass,
 		&karpv1.NodeClaim{},
 		createCandidate{
@@ -880,6 +928,8 @@ type stubCCEAPI struct {
 	createNodeReqs  []*cceMdl.CreateNodeRequest
 	createNodeResps []*cceMdl.CreateNodeResponse
 	createNodeErrs  []error
+	showNodeResp    *cceMdl.ShowNodeResponse
+	listNodesResp   *cceMdl.ListNodesResponse
 }
 
 func (s *stubCCEAPI) ShowCluster(*cceMdl.ShowClusterRequest) (*cceMdl.ShowClusterResponse, error) {
@@ -909,11 +959,11 @@ func (s *stubCCEAPI) DeleteNode(*cceMdl.DeleteNodeRequest) (*cceMdl.DeleteNodeRe
 }
 
 func (s *stubCCEAPI) ListNodes(*cceMdl.ListNodesRequest) (*cceMdl.ListNodesResponse, error) {
-	return nil, nil
+	return s.listNodesResp, nil
 }
 
 func (s *stubCCEAPI) ShowNode(*cceMdl.ShowNodeRequest) (*cceMdl.ShowNodeResponse, error) {
-	return nil, nil
+	return s.showNodeResp, nil
 }
 
 func (s *stubCCEAPI) ShowJob(*cceMdl.ShowJobRequest) (*cceMdl.ShowJobResponse, error) {

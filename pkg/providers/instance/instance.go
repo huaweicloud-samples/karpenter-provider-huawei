@@ -161,7 +161,7 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.CCENod
 
 	var lastUnavailableErr error
 	for _, c := range filteredCandidates {
-		spec, err := p.nodeSpecForCandidate(nodeClass, nodeClaim, c, osAlias)
+		spec, err := nodeSpecForCandidate(nodeClass, nodeClaim, c, osAlias)
 		if err != nil {
 			return nil, err
 		}
@@ -275,9 +275,6 @@ func (p *DefaultProvider) filterUnavailableCandidates(candidates []createCandida
 }
 
 func offeringCapacityType(offering *cloudprovider.Offering) string {
-	if offering == nil {
-		return karpv1.CapacityTypeOnDemand
-	}
 	capacityTypeReq, ok := offering.Requirements[karpv1.CapacityTypeLabelKey]
 	if !ok || capacityTypeReq.Len() == 0 {
 		return karpv1.CapacityTypeOnDemand
@@ -301,8 +298,8 @@ func summarizeErrorMessage(msg string) string {
 	return msg[:157] + "..."
 }
 
-func (p *DefaultProvider) nodeSpecForCandidate(nodeClass *v1alpha1.CCENodeClass, nodeClaim *karpv1.NodeClaim, c createCandidate, osAlias string) (*cceMdl.NodeSpec, error) {
-	rootVolume := resolveRootVolume(nodeClass)
+func nodeSpecForCandidate(nodeClass *v1alpha1.CCENodeClass, nodeClaim *karpv1.NodeClaim, c createCandidate, osAlias string) (*cceMdl.NodeSpec, error) {
+	rootVolume := toCCEVolume(&nodeClass.Spec.BlockDeviceMappings.Root)
 	dataVolumes := resolveDataVolumes(nodeClass, rootVolume.Volumetype)
 	storage := resolveStorage(nodeClass, rootVolume.Volumetype)
 	login := resolveLogin(nodeClass)
@@ -476,10 +473,6 @@ func toCreateNodeInt32(fieldPath string, value int64) (int32, error) {
 	return int32(value), nil
 }
 
-func resolveRootVolume(nodeClass *v1alpha1.CCENodeClass) *cceMdl.Volume {
-	return toCCEVolume(&nodeClass.Spec.BlockDeviceMappings.Root)
-}
-
 func resolveDataVolumes(nodeClass *v1alpha1.CCENodeClass, rootVolumeType string) *[]cceMdl.Volume {
 	volumes := make([]cceMdl.Volume, 0, 1+len(nodeClass.Spec.BlockDeviceMappings.Users))
 	if nodeClass.Spec.BlockDeviceMappings.K8S != nil {
@@ -649,9 +642,6 @@ func toCCETaints(nodeClaim *karpv1.NodeClaim) *[]cceMdl.Taint {
 			Effect: toCCETaintEffect(t.Effect),
 		})
 	}
-	if len(out) == 0 {
-		return nil
-	}
 	return lo.ToPtr(out)
 }
 
@@ -687,7 +677,7 @@ func (p *DefaultProvider) Get(ctx context.Context, providerID string) (*Instance
 	if resp == nil {
 		return nil, cloudprovider.NewNodeClaimNotFoundError(fmt.Errorf("CCE node not found for nodeId=%q", nodeID))
 	}
-	return instanceFromCCEShowNodeResponse(resp), nil
+	return instanceFromCCENodeParts(resp.Metadata, resp.Spec, resp.Status), nil
 }
 
 func (p *DefaultProvider) List(ctx context.Context) ([]*Instance, error) {
@@ -698,11 +688,11 @@ func (p *DefaultProvider) List(ctx context.Context) ([]*Instance, error) {
 	if resp == nil || resp.Items == nil {
 		return nil, nil
 	}
-	out := make([]*Instance, 0, len(lo.FromPtr(resp.Items)))
-	for _, n := range lo.FromPtr(resp.Items) {
-		node := n
-		inst := instanceFromCCENode(&node)
-		if inst == nil || inst.NodeID == "" {
+	items := lo.FromPtr(resp.Items)
+	out := make([]*Instance, 0, len(items))
+	for _, node := range items {
+		inst := instanceFromCCENodeParts(node.Metadata, node.Spec, node.Status)
+		if inst.NodeID == "" {
 			continue
 		}
 		out = append(out, inst)
@@ -746,26 +736,11 @@ func instanceFromCCENodeParts(metadata *cceMdl.NodeMetadata, spec *cceMdl.NodeSp
 	return out
 }
 
-func instanceFromCCENode(node *cceMdl.Node) *Instance {
-	if node == nil {
-		return nil
-	}
-	return instanceFromCCENodeParts(node.Metadata, node.Spec, node.Status)
-}
-
-func instanceFromCCEShowNodeResponse(resp *cceMdl.ShowNodeResponse) *Instance {
-	if resp == nil {
-		return nil
-	}
-	return instanceFromCCENodeParts(resp.Metadata, resp.Spec, resp.Status)
-}
-
 func nodeIDFromProviderID(providerID string) (string, error) {
-	nodeID := providerID
-	if nodeID == "" {
+	if providerID == "" {
 		return "", fmt.Errorf("providerID is empty")
 	}
-	return nodeID, nil
+	return providerID, nil
 }
 
 func isInsufficientCapacityError(err error) bool {
