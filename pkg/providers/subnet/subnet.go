@@ -23,7 +23,6 @@ import (
 	"sync"
 
 	"github.com/awslabs/operatorpkg/serrors"
-	cms "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/cms/v1/model"
 	vpcMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/model"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
@@ -43,8 +42,8 @@ import (
 type Provider interface {
 	LivenessProbe(*http.Request) error
 	List(context.Context, *v1alpha1.CCENodeClass) ([]vpcMdl.Subnet, error)
-	ZonalSubnetsForLaunch(context.Context, *v1alpha1.CCENodeClass, []*cloudprovider.InstanceType, string) (map[string]*Subnet, error)
-	UpdateInflightIPs(*cms.CreateAutoLaunchGroupRequest, *cms.CreateAutoLaunchGroupResponse, []*cloudprovider.InstanceType, []*Subnet, string)
+	SelectForLaunch(context.Context, *v1alpha1.CCENodeClass, []*cloudprovider.InstanceType, string) (*Subnet, error)
+	ReleaseInflightIPs(*Subnet)
 }
 
 type DefaultProvider struct {
@@ -58,8 +57,8 @@ type DefaultProvider struct {
 
 type Subnet struct {
 	ID                      string
-	Zone                    string
 	AvailableIPAddressCount int32
+	reservedIPAddressCount  int32
 }
 
 func NewDefaultProvider(vpcapi sdk.VPCAPI, cache *cache.Cache, availableIPAddressCache *cache.Cache) Provider {
@@ -118,10 +117,7 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass *v1alpha1.CCENodeC
 	if p.cm.HasChanged(fmt.Sprintf("subnets/%s", nodeClass.Name), lo.Keys(subnets)) {
 		log.FromContext(ctx).
 			WithValues("subnets", lo.Map(lo.Values(subnets), func(s vpcMdl.Subnet, _ int) v1alpha1.Subnet {
-				return v1alpha1.Subnet{
-					ID:   s.Id,
-					Zone: s.AvailabilityZone,
-				}
+				return v1alpha1.Subnet{ID: s.Id}
 			})).V(1).Info("discovered subnets")
 	}
 	return lo.Values(subnets), nil
@@ -149,8 +145,8 @@ func matchesSubnetSelectorTerms(subnet vpcMdl.Subnet, terms []v1alpha1.SubnetSel
 	return false
 }
 
-// ZonalSubnetsForLaunch returns a mapping of zone to the subnet with the most available IP addresses and deducts the passed ips from the available count
-func (p *DefaultProvider) ZonalSubnetsForLaunch(ctx context.Context, nodeClass *v1alpha1.CCENodeClass, instanceTypes []*cloudprovider.InstanceType, capacityType string) (map[string]*Subnet, error) {
+// SelectForLaunch returns the subnet with the most available IP addresses and reserves the predicted usage.
+func (p *DefaultProvider) SelectForLaunch(_ context.Context, nodeClass *v1alpha1.CCENodeClass, instanceTypes []*cloudprovider.InstanceType, capacityType string) (*Subnet, error) {
 	if len(nodeClass.Status.Subnets) == 0 {
 		return nil, fmt.Errorf("no subnets matched selector %v", nodeClass.Spec.SubnetSelectorTerms)
 	}
@@ -165,8 +161,7 @@ func (p *DefaultProvider) ZonalSubnetsForLaunch(ctx context.Context, nodeClass *
 		}
 	}
 
-	// Select the subnet with the most available IPs. Subnet zones are treated as informational; the chosen subnet is
-	// considered a candidate for all zones where the instance types have compatible offerings.
+	// Select the subnet with the most available IPs.
 	selectedSubnetID := ""
 	var selectedSubnetAvailableIPs int32 = -1
 	for _, subnet := range nodeClass.Status.Subnets {
@@ -196,27 +191,8 @@ func (p *DefaultProvider) ZonalSubnetsForLaunch(ctx context.Context, nodeClass *
 			zones.Insert(zone)
 		}
 	}
-	// Fallback to the discovered subnet zones if offerings don't yield any zones.
-	if zones.Len() == 0 {
-		for _, subnet := range nodeClass.Status.Subnets {
-			zone := subnet.Zone
-			if zone == "" {
-				continue
-			}
-			zones.Insert(zone)
-		}
-	}
 
-	zonalSubnets := map[string]*Subnet{}
-	for zone := range zones {
-		zonalSubnets[zone] = &Subnet{
-			ID:                      selectedSubnetID,
-			Zone:                    zone,
-			AvailableIPAddressCount: selectedSubnetAvailableIPs,
-		}
-	}
-
-	// Reserve inflight IPs once per subnet (by ID) using the maximum predicted usage across all candidate zones.
+	// Reserve inflight IPs once per subnet (by ID) using the maximum predicted usage across all offering zones.
 	maxPredictedIPsUsed := int32(0)
 	for zone := range zones {
 		predictedIPsUsed := p.minPods(instanceTypes, scheduling.NewRequirements(
@@ -234,62 +210,43 @@ func (p *DefaultProvider) ZonalSubnetsForLaunch(ctx context.Context, nodeClass *
 		}
 		p.inflightIPs[selectedSubnetID] = prevIPs - maxPredictedIPsUsed
 	}
-	return zonalSubnets, nil
+	return &Subnet{
+		ID:                      selectedSubnetID,
+		AvailableIPAddressCount: selectedSubnetAvailableIPs,
+		reservedIPAddressCount:  maxPredictedIPsUsed,
+	}, nil
 }
 
-// UpdateInflightIPs updates in-memory IP usage by releasing predicted reservations after a CreateAutoLaunchGroup request completes.
-// Until instance creation results are wired in, this method always adds back the full reservation made in ZonalSubnetsForLaunch.
-func (p *DefaultProvider) UpdateInflightIPs(request *cms.CreateAutoLaunchGroupRequest, response *cms.CreateAutoLaunchGroupResponse, instanceTypes []*cloudprovider.InstanceType,
-	subnets []*Subnet, capacityType string) {
-	_ = request
-	_ = response
+// ReleaseInflightIPs releases the predicted reservation after a node creation attempt completes.
+// Until instance creation results are wired in, this method always adds back the full reservation made in SelectForLaunch.
+func (p *DefaultProvider) ReleaseInflightIPs(subnet *Subnet) {
+	if subnet == nil || subnet.ID == "" {
+		return
+	}
 
 	p.Lock()
 	defer p.Unlock()
 
-	zonesBySubnetID := map[string]sets.Set[string]{}
-	for _, subnet := range subnets {
-		if subnet == nil || subnet.ID == "" {
-			continue
-		}
-		if _, ok := zonesBySubnetID[subnet.ID]; !ok {
-			zonesBySubnetID[subnet.ID] = sets.New[string]()
-		}
-		if zone := subnet.Zone; zone != "" {
-			zonesBySubnetID[subnet.ID].Insert(zone)
+	reserved := subnet.reservedIPAddressCount
+	if reserved == 0 {
+		return
+	}
+	subnet.reservedIPAddressCount = 0
+
+	current, ok := p.inflightIPs[subnet.ID]
+	if !ok {
+		return
+	}
+	updated := current + reserved
+
+	if baselineValue, ok := p.availableIPAddressCache.Get(subnet.ID); ok {
+		baseline := baselineValue.(int32)
+		if updated >= baseline {
+			delete(p.inflightIPs, subnet.ID)
+			return
 		}
 	}
-
-	for subnetID, zones := range zonesBySubnetID {
-		maxReserved := int32(0)
-		for zone := range zones {
-			reserved := p.minPods(instanceTypes, scheduling.NewRequirements(
-				scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType),
-				scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
-			))
-			if reserved > maxReserved {
-				maxReserved = reserved
-			}
-		}
-		if maxReserved == 0 {
-			continue
-		}
-
-		current, ok := p.inflightIPs[subnetID]
-		if !ok {
-			continue
-		}
-		updated := current + maxReserved
-
-		if baselineValue, ok := p.availableIPAddressCache.Get(subnetID); ok {
-			baseline := baselineValue.(int32)
-			if updated >= baseline {
-				delete(p.inflightIPs, subnetID)
-				continue
-			}
-		}
-		p.inflightIPs[subnetID] = updated
-	}
+	p.inflightIPs[subnet.ID] = updated
 }
 
 func (p *DefaultProvider) minPods(instanceTypes []*cloudprovider.InstanceType, reqs scheduling.Requirements) int32 {

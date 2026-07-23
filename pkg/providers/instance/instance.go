@@ -145,14 +145,13 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.CCENod
 		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("no compatible instance types for requirements"))
 	}
 
-	zonalSubnets, err := p.subnetProvider.ZonalSubnetsForLaunch(ctx, nodeClass, compatibleInstanceTypes, karpv1.CapacityTypeOnDemand)
+	selectedSubnet, err := p.subnetProvider.SelectForLaunch(ctx, nodeClass, compatibleInstanceTypes, karpv1.CapacityTypeOnDemand)
 	if err != nil {
 		return nil, err
 	}
-	reservedSubnets := lo.Values(zonalSubnets)
-	defer p.subnetProvider.UpdateInflightIPs(nil, nil, compatibleInstanceTypes, reservedSubnets, karpv1.CapacityTypeOnDemand)
+	defer p.subnetProvider.ReleaseInflightIPs(selectedSubnet)
 
-	candidates := buildCreateCandidates(compatibleInstanceTypes, reqs, zonalSubnets)
+	candidates := buildCreateCandidates(compatibleInstanceTypes, reqs, selectedSubnet)
 	if len(candidates) == 0 {
 		return nil, cloudprovider.NewInsufficientCapacityError(fmt.Errorf("no compatible (instanceType, zone, subnet) candidates"))
 	}
@@ -232,7 +231,10 @@ func (p *DefaultProvider) Create(ctx context.Context, nodeClass *v1alpha1.CCENod
 	return nil, fmt.Errorf("CreateNode failed for all candidates")
 }
 
-func buildCreateCandidates(instanceTypes []*cloudprovider.InstanceType, reqs scheduling.Requirements, zonalSubnets map[string]*subnet.Subnet) []createCandidate {
+func buildCreateCandidates(instanceTypes []*cloudprovider.InstanceType, reqs scheduling.Requirements, selectedSubnet *subnet.Subnet) []createCandidate {
+	if selectedSubnet == nil || selectedSubnet.ID == "" {
+		return nil
+	}
 	seen := map[string]struct{}{}
 	candidates := make([]createCandidate, 0, len(instanceTypes))
 	for _, it := range instanceTypes {
@@ -243,10 +245,6 @@ func buildCreateCandidates(instanceTypes []*cloudprovider.InstanceType, reqs sch
 			}
 			zone := zoneReq.Values()[0]
 			capacityType := offeringCapacityType(of)
-			zSubnet, ok := zonalSubnets[zone]
-			if !ok || zSubnet == nil || zSubnet.ID == "" {
-				continue
-			}
 			key := capacityType + "/" + zone + "/" + it.Name
 			if _, ok := seen[key]; ok {
 				continue
@@ -257,7 +255,7 @@ func buildCreateCandidates(instanceTypes []*cloudprovider.InstanceType, reqs sch
 				capacityType: capacityType,
 				price:        of.Price,
 				zone:         zone,
-				subnetID:     zSubnet.ID,
+				subnetID:     selectedSubnet.ID,
 			})
 		}
 	}

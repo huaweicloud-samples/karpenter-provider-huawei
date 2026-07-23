@@ -108,7 +108,6 @@ func (d *DefaultResolver) Resolve(ctx context.Context, info ecsMdl.Flavor, zones
 		info,
 		d.region,
 		zones,
-		nodeClass.Zones(),
 		runtimeType,
 		kc.MaxPods,
 		nodeClass.BlockDeviceMappings(),
@@ -121,7 +120,6 @@ func NewInstanceType(
 	info ecsMdl.Flavor,
 	region string,
 	offeringZones []string,
-	subnetZones []string,
 	runtimeType string,
 	maxPods *int32,
 	blockDeviceMappings v1alpha1.BlockDeviceMappings,
@@ -130,7 +128,7 @@ func NewInstanceType(
 ) *cloudprovider.InstanceType {
 	it := &cloudprovider.InstanceType{
 		Name:         info.Name,
-		Requirements: computeRequirements(info, region, offeringZones, subnetZones),
+		Requirements: computeRequirements(info, region, offeringZones),
 		Capacity:     computeCapacity(info, maxPods, blockDeviceMappings),
 		Overhead: &cloudprovider.InstanceTypeOverhead{
 			KubeReserved:      kubeReservedResources(cpu(info), int64(info.Ram), runtimeType, kubeReserved),
@@ -141,14 +139,9 @@ func NewInstanceType(
 	return it
 }
 
-func computeRequirements(info ecsMdl.Flavor, region string, offeringZones []string, subnetZones []string) scheduling.Requirements {
+func computeRequirements(info ecsMdl.Flavor, region string, offeringZones []string) scheduling.Requirements {
 	capacityTypes := []string{ChargeTypeOnDemand}
-	// availableZones is the set of zones where the instance type is offered. subnetZones are informational and only
-	// used as a fallback when offerings don't include explicit zone information.
 	availableZones := sets.New(offeringZones...)
-	if availableZones.Len() == 0 {
-		availableZones = sets.New(subnetZones...)
-	}
 
 	requirements := scheduling.NewRequirements(
 		// Well Known Upstream

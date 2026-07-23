@@ -154,7 +154,7 @@ func TestCreate_AnnotatesReturnedNodeClaimWithCCENodeClassHash(t *testing.T) {
 			},
 		},
 		Status: v1alpha1.CCENodeClassStatus{
-			Subnets: []v1alpha1.Subnet{{ID: "subnet-123", Zone: "zone-a"}},
+			Subnets: []v1alpha1.Subnet{{ID: "subnet-123"}},
 		},
 	}
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeSubnetsReady)
@@ -229,7 +229,7 @@ func TestCreate_RejectsNodeClassWithUndersizedDataVolumeBeforeCallingCloudAPI(t 
 			},
 		},
 		Status: v1alpha1.CCENodeClassStatus{
-			Subnets: []v1alpha1.Subnet{{ID: "subnet-123", Zone: "zone-a"}},
+			Subnets: []v1alpha1.Subnet{{ID: "subnet-123"}},
 		},
 	}
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeSubnetsReady)

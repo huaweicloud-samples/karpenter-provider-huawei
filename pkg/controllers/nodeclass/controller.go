@@ -79,7 +79,7 @@ func NewController(
 		kubeClient: kubeClient,
 		recorder:   recorder,
 		reconcilers: []reconcile.TypedReconciler[*v1alpha1.CCENodeClass]{
-			NewSubnetReconciler(kubeClient, subnetProvider),
+			NewSubnetReconciler(subnetProvider),
 		},
 	}
 }

@@ -29,6 +29,7 @@ type ECSAPI interface {
 	ListServersDetails(request *ecs.ListServersDetailsRequest) (*ecs.ListServersDetailsResponse, error)
 	BatchCreateServerTags(request *ecs.BatchCreateServerTagsRequest) (*ecs.BatchCreateServerTagsResponse, error)
 	ListFlavors(request *ecs.ListFlavorsRequest) (*ecs.ListFlavorsResponse, error)
+	ListServerAzInfo(request *ecs.ListServerAzInfoRequest) (*ecs.ListServerAzInfoResponse, error)
 }
 
 // IMSAPI abstracts the subset of Huawei Cloud IMS-related APIs used by this project.

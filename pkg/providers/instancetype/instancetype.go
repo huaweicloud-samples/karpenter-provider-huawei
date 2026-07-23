@@ -26,7 +26,6 @@ import (
 
 	"github.com/awslabs/operatorpkg/serrors"
 	ecsMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/ecs/v2/model"
-	"github.com/mitchellh/hashstructure/v2"
 	"github.com/patrickmn/go-cache"
 	"github.com/samber/lo"
 	corev1 "k8s.io/api/core/v1"
@@ -49,7 +48,6 @@ type NodeClass interface {
 	KubeletConfiguration() *v1alpha1.KubeletConfiguration
 	RuntimeConfiguration() *v1alpha1.RuntimeConfiguration
 	BlockDeviceMappings() v1alpha1.BlockDeviceMappings
-	Zones() []string
 }
 
 type Provider interface {
@@ -118,10 +116,6 @@ func (p *DefaultProvider) Get(ctx context.Context, nodeClass NodeClass, name sdk
 	if len(p.instanceTypesOfferings) == 0 {
 		return nil, fmt.Errorf("no instance types offerings found")
 	}
-	if len(nodeClass.Zones()) == 0 {
-		return nil, fmt.Errorf("no subnets found")
-	}
-
 	var instanceType *cloudprovider.InstanceType
 	if item, ok := p.instanceTypesCache.Get(p.cacheKey(nodeClass)); ok {
 		instanceType, _ = lo.Find(item.([]*cloudprovider.InstanceType), func(i *cloudprovider.InstanceType) bool {
@@ -138,7 +132,6 @@ func (p *DefaultProvider) Get(ctx context.Context, nodeClass NodeClass, name sdk
 	return p.InjectOfferings(
 		ctx,
 		[]*cloudprovider.InstanceType{instanceType},
-		nodeClass,
 		p.allZones,
 	)[0], nil
 }
@@ -153,10 +146,6 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass NodeClass) ([]*clo
 	if len(p.instanceTypesOfferings) == 0 {
 		return nil, fmt.Errorf("no instance types offerings found")
 	}
-	if len(nodeClass.Zones()) == 0 {
-		return nil, fmt.Errorf("no subnets found")
-	}
-
 	key := p.cacheKey(nodeClass)
 	var instanceTypes []*cloudprovider.InstanceType
 	if item, ok := p.instanceTypesCache.Get(key); ok {
@@ -176,19 +165,16 @@ func (p *DefaultProvider) List(ctx context.Context, nodeClass NodeClass) ([]*clo
 	return p.InjectOfferings(
 		ctx,
 		instanceTypes,
-		nodeClass,
 		p.allZones,
 	), nil
 }
 
 func (p *DefaultProvider) cacheKey(nodeClass NodeClass) string {
-	// Compute fully initialized instance types hash key
-	subnetZonesHash, _ := hashstructure.Hash(nodeClass.Zones(), hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
 	itsHash := ""
 	if p.instanceTypesResolver != nil {
 		itsHash = p.instanceTypesResolver.CacheKey(nodeClass)
 	}
-	return fmt.Sprintf("%016x-%s", subnetZonesHash, itsHash)
+	return itsHash
 }
 
 func (p *DefaultProvider) get(ctx context.Context, nodeClass NodeClass, name sdk.InstanceType) (*cloudprovider.InstanceType, error) {
@@ -203,21 +189,19 @@ func (p *DefaultProvider) get(ctx context.Context, nodeClass NodeClass, name sdk
 	if it == nil {
 		return nil, fmt.Errorf("failed to generate instance type %s", name)
 	}
-	if cached, ok := p.discoveredCapacityCache.Get(discoveredCapacityCacheKey(it.Name, nodeClass)); ok {
+	if cached, ok := p.discoveredCapacityCache.Get(discoveredCapacityCacheKey(it.Name)); ok {
 		it.Capacity[corev1.ResourceMemory] = cached.(resource.Quantity)
 	}
 	return it, nil
 }
 
-func discoveredCapacityCacheKey(instanceType string, nodeClass NodeClass) string {
-	hash, _ := hashstructure.Hash(nodeClass.Zones(), hashstructure.FormatV2, &hashstructure.HashOptions{SlicesAsSets: true})
-	return fmt.Sprintf("%s-%016x", instanceType, hash)
+func discoveredCapacityCacheKey(instanceType string) string {
+	return instanceType
 }
 
 func (p *DefaultProvider) InjectOfferings(
 	ctx context.Context,
 	instanceTypes []*cloudprovider.InstanceType,
-	nodeClass NodeClass,
 	allZones sets.Set[string],
 ) []*cloudprovider.InstanceType {
 	var its []*cloudprovider.InstanceType
@@ -225,7 +209,6 @@ func (p *DefaultProvider) InjectOfferings(
 		offerings := p.createOfferings(
 			ctx,
 			it,
-			nodeClass,
 			allZones,
 		)
 		// NOTE: By making this copy one level deep, we can modify the offerings without mutating the results from previous
@@ -245,20 +228,17 @@ func (p *DefaultProvider) InjectOfferings(
 func (p *DefaultProvider) createOfferings(
 	ctx context.Context,
 	it *cloudprovider.InstanceType,
-	nodeClass NodeClass,
 	allZones sets.Set[string],
 ) cloudprovider.Offerings {
 	_ = ctx
-	offeringZones := p.instanceTypesOfferings[sdk.InstanceType(it.Name)]
+	offeringZones, offeringZonesKnown := p.instanceTypesOfferings[sdk.InstanceType(it.Name)]
 
 	availableZones := sets.New[string](it.Requirements.Get(corev1.LabelTopologyZone).Values()...)
 	if len(availableZones) == 0 {
-		if offeringZones.Len() != 0 {
+		if offeringZonesKnown {
 			availableZones = offeringZones
 		} else if allZones.Len() != 0 {
 			availableZones = allZones
-		} else {
-			availableZones = sets.New(nodeClass.Zones()...)
 		}
 	}
 
@@ -310,12 +290,16 @@ func (p *DefaultProvider) Refresh(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	zones, err := p.fetchAvailabilityZones()
+	if err != nil {
+		return err
+	}
 
 	p.muInstanceTypes.Lock()
 	defer p.muInstanceTypes.Unlock()
 
 	p.updateInstanceTypesLocked(ctx, instanceTypes)
-	p.updateInstanceTypeOfferingsLocked(ctx, instanceTypes)
+	p.updateInstanceTypeOfferingsLocked(ctx, instanceTypes, zones)
 	return nil
 }
 
@@ -348,18 +332,22 @@ func (p *DefaultProvider) UpdateInstanceTypeOfferings(ctx context.Context) error
 	if err != nil {
 		return err
 	}
+	zones, err := p.fetchAvailabilityZones()
+	if err != nil {
+		return err
+	}
 
 	p.muInstanceTypes.Lock()
 	defer p.muInstanceTypes.Unlock()
-	p.updateInstanceTypeOfferingsLocked(ctx, instanceTypes)
+	p.updateInstanceTypeOfferingsLocked(ctx, instanceTypes, zones)
 	return nil
 }
 
-func (p *DefaultProvider) updateInstanceTypeOfferingsLocked(ctx context.Context, instanceTypes []ecsMdl.Flavor) {
+func (p *DefaultProvider) updateInstanceTypeOfferingsLocked(ctx context.Context, instanceTypes []ecsMdl.Flavor, availableZones sets.Set[string]) {
 	// Get offerings from ECS
 	instanceTypeOfferings := map[sdk.InstanceType]sets.Set[string]{}
 
-	zoneUniverse := sets.New[string]()
+	zoneUniverse := sets.New(availableZones.UnsortedList()...)
 	for _, instanceType := range instanceTypes {
 		if instanceType.OsExtraSpecs == nil || instanceType.OsExtraSpecs.Condoperationaz == nil {
 			continue
@@ -392,6 +380,18 @@ func (p *DefaultProvider) updateInstanceTypeOfferingsLocked(ctx context.Context,
 		log.FromContext(ctx).WithValues("zones", allZones.UnsortedList()).V(1).Info("discovered zones")
 	}
 	p.allZones = allZones
+}
+
+func (p *DefaultProvider) fetchAvailabilityZones() (sets.Set[string], error) {
+	response, err := p.ecsapi.ListServerAzInfo(&ecsMdl.ListServerAzInfoRequest{})
+	if err != nil {
+		return nil, fmt.Errorf("listing availability zones, %w", err)
+	}
+	zones := sets.New[string]()
+	for _, zone := range lo.FromPtr(response.AvailabilityZones) {
+		zones.Insert(zone.AvailabilityZoneId)
+	}
+	return zones, nil
 }
 
 func resolveOfferingZones(zoneUniverse sets.Set[string], extraSpecs *ecsMdl.FlavorExtraSpec) sets.Set[string] {
@@ -463,7 +463,7 @@ func (p *DefaultProvider) UpdateInstanceTypeCapacityFromNode(ctx context.Context
 	// Get mappings for most recent AMIs
 	instanceTypeName := node.Labels[corev1.LabelInstanceTypeStable]
 
-	key := discoveredCapacityCacheKey(instanceTypeName, nodeClass)
+	key := discoveredCapacityCacheKey(instanceTypeName)
 	actualCapacity := node.Status.Capacity.Memory()
 	if cachedCapacity, ok := p.discoveredCapacityCache.Get(key); !ok || actualCapacity.Cmp(cachedCapacity.(resource.Quantity)) < 1 {
 		// Update the capacity in the cache if it is less than or equal to the current cached capacity. We update when it's equal to refresh the TTL.

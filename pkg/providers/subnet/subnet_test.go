@@ -33,12 +33,11 @@ import (
 	sdk "github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/huawei"
 )
 
-func TestUpdateInflightIPs_ReleasesSingleReservationBackToBaseline(t *testing.T) {
+func TestReleaseInflightIPsReleasesSingleReservationBackToBaseline(t *testing.T) {
 	ctx := context.Background()
 
 	const (
 		subnetID      = "subnet-123"
-		zone          = "zone-a"
 		capacityType  = "on-demand"
 		baselineIPs   = int32(100)
 		instancePods  = int64(10)
@@ -49,40 +48,36 @@ func TestUpdateInflightIPs_ReleasesSingleReservationBackToBaseline(t *testing.T)
 	p.availableIPAddressCache.SetDefault(subnetID, baselineIPs)
 
 	instanceTypes := []*cloudprovider.InstanceType{
-		newTestInstanceType(zone, capacityType, instancePods),
+		newTestInstanceType(instancePods),
 	}
 	nodeClass := &v1alpha1.CCENodeClass{
 		Status: v1alpha1.CCENodeClassStatus{
-			Subnets: []v1alpha1.Subnet{
-				{ID: subnetID, Zone: zone},
-			},
+			Subnets: []v1alpha1.Subnet{{ID: subnetID}},
 		},
 	}
 
-	zonalSubnets, err := p.ZonalSubnetsForLaunch(ctx, nodeClass, instanceTypes, capacityType)
+	chosen, err := p.SelectForLaunch(ctx, nodeClass, instanceTypes, capacityType)
 	if err != nil {
-		t.Fatalf("ZonalSubnetsForLaunch() error = %v", err)
+		t.Fatalf("SelectForLaunch() error = %v", err)
 	}
-	chosen := zonalSubnets[zone]
 	if chosen == nil || chosen.ID != subnetID {
-		t.Fatalf("expected chosen subnet %q in zone %q, got %#v", subnetID, zone, chosen)
+		t.Fatalf("expected chosen subnet %q, got %#v", subnetID, chosen)
 	}
 	if got := p.inflightIPs[subnetID]; got != expectedAfter {
 		t.Fatalf("expected inflightIPs[%q]=%d after reservation, got %d", subnetID, expectedAfter, got)
 	}
 
-	p.UpdateInflightIPs(nil, nil, instanceTypes, []*Subnet{chosen}, capacityType)
+	p.ReleaseInflightIPs(chosen)
 	if _, ok := p.inflightIPs[subnetID]; ok {
 		t.Fatalf("expected inflightIPs[%q] cleared after release, got %d", subnetID, p.inflightIPs[subnetID])
 	}
 }
 
-func TestUpdateInflightIPs_ReleasesReservationsInSteps(t *testing.T) {
+func TestReleaseInflightIPsReleasesReservationsInSteps(t *testing.T) {
 	ctx := context.Background()
 
 	const (
 		subnetID     = "subnet-123"
-		zone         = "zone-a"
 		capacityType = "on-demand"
 		baselineIPs  = int32(100)
 		instancePods = int64(10)
@@ -92,37 +87,106 @@ func TestUpdateInflightIPs_ReleasesReservationsInSteps(t *testing.T) {
 	p.availableIPAddressCache.SetDefault(subnetID, baselineIPs)
 
 	instanceTypes := []*cloudprovider.InstanceType{
-		newTestInstanceType(zone, capacityType, instancePods),
+		newTestInstanceType(instancePods),
 	}
 	nodeClass := &v1alpha1.CCENodeClass{
 		Status: v1alpha1.CCENodeClassStatus{
-			Subnets: []v1alpha1.Subnet{
-				{ID: subnetID, Zone: zone},
-			},
+			Subnets: []v1alpha1.Subnet{{ID: subnetID}},
 		},
 	}
 
-	_, err := p.ZonalSubnetsForLaunch(ctx, nodeClass, instanceTypes, capacityType)
+	firstReservation, err := p.SelectForLaunch(ctx, nodeClass, instanceTypes, capacityType)
 	if err != nil {
-		t.Fatalf("ZonalSubnetsForLaunch() error = %v", err)
+		t.Fatalf("SelectForLaunch() error = %v", err)
 	}
-	zonalSubnets, err := p.ZonalSubnetsForLaunch(ctx, nodeClass, instanceTypes, capacityType)
+	secondReservation, err := p.SelectForLaunch(ctx, nodeClass, instanceTypes, capacityType)
 	if err != nil {
-		t.Fatalf("ZonalSubnetsForLaunch() error = %v", err)
+		t.Fatalf("SelectForLaunch() error = %v", err)
 	}
-	chosen := zonalSubnets[zone]
 	if got := p.inflightIPs[subnetID]; got != 80 {
 		t.Fatalf("expected inflightIPs[%q]=80 after two reservations, got %d", subnetID, got)
 	}
 
-	p.UpdateInflightIPs(nil, nil, instanceTypes, []*Subnet{chosen}, capacityType)
+	p.ReleaseInflightIPs(firstReservation)
 	if got := p.inflightIPs[subnetID]; got != 90 {
 		t.Fatalf("expected inflightIPs[%q]=90 after releasing one reservation, got %d", subnetID, got)
 	}
 
-	p.UpdateInflightIPs(nil, nil, instanceTypes, []*Subnet{chosen}, capacityType)
+	p.ReleaseInflightIPs(secondReservation)
 	if _, ok := p.inflightIPs[subnetID]; ok {
 		t.Fatalf("expected inflightIPs[%q] cleared after releasing two reservations, got %d", subnetID, p.inflightIPs[subnetID])
+	}
+}
+
+func TestReleaseInflightIPsReleasesMatchingReservationOutOfOrder(t *testing.T) {
+	const (
+		subnetID     = "subnet-123"
+		capacityType = "on-demand"
+		baselineIPs  = int32(100)
+	)
+	p := newTestProvider()
+	p.availableIPAddressCache.SetDefault(subnetID, baselineIPs)
+	nodeClass := &v1alpha1.CCENodeClass{
+		Status: v1alpha1.CCENodeClassStatus{Subnets: []v1alpha1.Subnet{{ID: subnetID}}},
+	}
+	smallInstanceTypes := []*cloudprovider.InstanceType{newTestInstanceType(10)}
+	largeInstanceTypes := []*cloudprovider.InstanceType{newTestInstanceType(20)}
+
+	smallReservation, err := p.SelectForLaunch(context.Background(), nodeClass, smallInstanceTypes, capacityType)
+	if err != nil {
+		t.Fatalf("selecting subnet for small instance: %v", err)
+	}
+	largeReservation, err := p.SelectForLaunch(context.Background(), nodeClass, largeInstanceTypes, capacityType)
+	if err != nil {
+		t.Fatalf("selecting subnet for large instance: %v", err)
+	}
+	if got := p.inflightIPs[subnetID]; got != 70 {
+		t.Fatalf("expected 70 IPs after both reservations, got %d", got)
+	}
+
+	p.ReleaseInflightIPs(largeReservation)
+	if got := p.inflightIPs[subnetID]; got != 90 {
+		t.Fatalf("expected releasing the 20-IP reservation first to restore 90 IPs, got %d", got)
+	}
+	p.ReleaseInflightIPs(smallReservation)
+	if _, ok := p.inflightIPs[subnetID]; ok {
+		t.Fatalf("expected all reservations to be released")
+	}
+}
+
+func TestSelectForLaunchReturnsOneSubnetAcrossOfferingZones(t *testing.T) {
+	p := newTestProvider()
+	p.availableIPAddressCache.SetDefault("subnet-123", int32(100))
+	nodeClass := &v1alpha1.CCENodeClass{
+		Status: v1alpha1.CCENodeClassStatus{
+			Subnets: []v1alpha1.Subnet{{ID: "subnet-123"}},
+		},
+	}
+	instanceTypes := []*cloudprovider.InstanceType{
+		{
+			Name: "test.it",
+			Offerings: cloudprovider.Offerings{
+				{Available: true, Requirements: scheduling.NewRequirements(
+					scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "zone-a"),
+				)},
+				{Available: true, Requirements: scheduling.NewRequirements(
+					scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
+					scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "zone-b"),
+				)},
+			},
+			Capacity: corev1.ResourceList{
+				corev1.ResourcePods: *resource.NewQuantity(10, resource.DecimalSI),
+			},
+		},
+	}
+
+	selected, err := p.SelectForLaunch(context.Background(), nodeClass, instanceTypes, "on-demand")
+	if err != nil {
+		t.Fatalf("SelectForLaunch() error = %v", err)
+	}
+	if selected == nil || selected.ID != "subnet-123" {
+		t.Fatalf("expected subnet-123 to be selected, got %#v", selected)
 	}
 }
 
@@ -299,10 +363,10 @@ func newTestProviderWithVPC(vpcapi sdk.VPCAPI) *DefaultProvider {
 	return NewDefaultProvider(vpcapi, c, available).(*DefaultProvider)
 }
 
-func newTestInstanceType(zone, capacityType string, pods int64) *cloudprovider.InstanceType {
+func newTestInstanceType(pods int64) *cloudprovider.InstanceType {
 	reqs := scheduling.NewRequirements(
-		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, capacityType),
-		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, zone),
+		scheduling.NewRequirement(karpv1.CapacityTypeLabelKey, corev1.NodeSelectorOpIn, "on-demand"),
+		scheduling.NewRequirement(corev1.LabelTopologyZone, corev1.NodeSelectorOpIn, "zone-a"),
 	)
 	return &cloudprovider.InstanceType{
 		Name: "test.it",

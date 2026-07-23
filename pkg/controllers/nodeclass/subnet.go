@@ -24,24 +24,18 @@ import (
 
 	vpcMdl "github.com/huaweicloud/huaweicloud-sdk-go-v3/services/vpc/v2/model"
 	"github.com/samber/lo"
-	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/apis/v1alpha1"
 	"github.com/HuaweiCloudDeveloper/karpenter-provider-huawei/pkg/providers/subnet"
 )
 
-const subnetIDLabelKey = "node.kubernetes.io/subnetid"
-
 type Subnet struct {
-	kubeClient     client.Client
 	subnetProvider subnet.Provider
 }
 
-func NewSubnetReconciler(kubeClient client.Client, subnetProvider subnet.Provider) *Subnet {
+func NewSubnetReconciler(subnetProvider subnet.Provider) *Subnet {
 	return &Subnet{
-		kubeClient:     kubeClient,
 		subnetProvider: subnetProvider,
 	}
 }
@@ -62,75 +56,9 @@ func (s *Subnet) Reconcile(ctx context.Context, nodeClass *v1alpha1.CCENodeClass
 		}
 		return subnets[i].Id < subnets[j].Id
 	})
-	subnetZones, err := s.subnetZonesFromNodes(ctx)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("resolving subnet zones from nodes, %w", err)
-	}
-	nodeClass.Status.Subnets = lo.FlatMap(subnets, func(subnet vpcMdl.Subnet, _ int) []v1alpha1.Subnet {
-		zone := subnet.AvailabilityZone
-		if zone != "" {
-			return []v1alpha1.Subnet{{
-				ID:   subnet.Id,
-				Zone: zone,
-			}}
-		}
-		if zones := subnetZones[subnet.Id]; len(zones) > 0 {
-			return lo.Map(zones, func(zone string, _ int) v1alpha1.Subnet {
-				return v1alpha1.Subnet{
-					ID:   subnet.Id,
-					Zone: zone,
-				}
-			})
-		}
-		return []v1alpha1.Subnet{{
-			ID:   subnet.Id,
-			Zone: "",
-		}}
+	nodeClass.Status.Subnets = lo.Map(subnets, func(subnet vpcMdl.Subnet, _ int) v1alpha1.Subnet {
+		return v1alpha1.Subnet{ID: subnet.Id}
 	})
-	if unresolved := lo.Filter(nodeClass.Status.Subnets, func(subnet v1alpha1.Subnet, _ int) bool {
-		return subnet.Zone == ""
-	}); len(unresolved) > 0 {
-		nodeClass.StatusConditions().SetFalse(
-			v1alpha1.ConditionTypeSubnetsReady,
-			"SubnetZonesNotResolved",
-			fmt.Sprintf("Unable to resolve availability zone for subnets %v", lo.Map(unresolved, func(subnet v1alpha1.Subnet, _ int) string { return subnet.ID })),
-		)
-		return reconcile.Result{RequeueAfter: time.Minute}, nil
-	}
 	nodeClass.StatusConditions().SetTrue(v1alpha1.ConditionTypeSubnetsReady)
 	return reconcile.Result{RequeueAfter: time.Minute}, nil
-}
-
-func (s *Subnet) subnetZonesFromNodes(ctx context.Context) (map[string][]string, error) {
-	if s.kubeClient == nil {
-		return map[string][]string{}, nil
-	}
-	nodes := &corev1.NodeList{}
-	if err := s.kubeClient.List(ctx, nodes); err != nil {
-		return nil, err
-	}
-	zones := map[string]map[string]struct{}{}
-	for _, node := range nodes.Items {
-		subnetID := node.Labels[subnetIDLabelKey]
-		if subnetID == "" {
-			continue
-		}
-		zone := node.Labels[corev1.LabelTopologyZone]
-		if zone == "" {
-			zone = node.Labels[corev1.LabelFailureDomainBetaZone]
-		}
-		if zone == "" {
-			continue
-		}
-		if _, ok := zones[subnetID]; !ok {
-			zones[subnetID] = map[string]struct{}{}
-		}
-		zones[subnetID][zone] = struct{}{}
-	}
-	resolved := map[string][]string{}
-	for subnetID, zoneSet := range zones {
-		resolved[subnetID] = lo.Keys(zoneSet)
-		sort.Strings(resolved[subnetID])
-	}
-	return resolved, nil
 }
